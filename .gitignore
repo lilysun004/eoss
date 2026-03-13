@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Datasets
+datasets/
+
+# Results
+results/
+
+# Wandb
+wandb/
+wandb_checkpoints/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Notebooks outputs (keep .ipynb files but ignore large outputs)
+*.nbconvert.ipynb
