@@ -5,7 +5,6 @@ from torch import linalg as LA
 import numpy as np
 from typing import List, Optional, Sequence
 
-import wandb
 from .lobpcg import torch_lobpcg, _maybe_orthonormalize
 from torch.func import functional_call
 
@@ -27,8 +26,7 @@ __all__ = ['param_vector', 'param_length', 'flatt', 'grads_vector',
            'gimme_new_rng', 'gimme_random_subset_idx',
            'compute_grad_gauss_newton_grad',
            'compute_gauss_newton_eigenvalues',
-           'compute_gbs_actual_batch', 'compute_gbs_probe_batches',
-           'compute_gbs_full_batch']
+           'compute_gbs_probe_batches']
 
 
 class EigenvectorCache:
@@ -472,11 +470,6 @@ def _run_lobpcg_with_operator(
     finally:
         pass
 
-    try:
-        wandb.log({"lobpcg_iterations": iterations}, commit=False)
-    except Exception:
-        pass
-
     if eigenvector_cache is not None:
         eigenvector_list = [eigenvectors[:, i] for i in range(eigenvectors.shape[1])]
         eigenvector_cache.store_eigenvectors(eigenvector_list, eigenvalues.tolist())
@@ -571,12 +564,6 @@ def compute_lambdamax_power_iteration(loss, net, max_iterations, reltol, init_ve
                     break
 
                 v = Hv / T.linalg.norm(Hv)
-
-        # Log the number of iterations to wandb
-        try:
-            wandb.log({"power_iteration_iterations": i + 1}, commit=False)
-        except:
-            pass
 
         # Store the final eigenvector in cache for future warm starts
         if eigenvector_cache is not None:
@@ -726,12 +713,6 @@ def calculate_averaged_grad_H_grad(net,
 
     num_samples = len(gHg_vals)
 
-    try:
-        wandb.log({"number_of_gHg_estimates": num_samples}, commit=False)
-    except:
-        pass
-
-
     if num_samples == 0:
         raise RuntimeError("calculate_averaged_grad_H_grad received no samples; check dataset and parameters.")
 
@@ -853,40 +834,6 @@ def calculate_averaged_grad_H_grad_step(net,
 ################################################################################
 
 
-def _averaged_hvp_power_iteration(net, X, Y, loss_fn, batch_indices_list, n_params, device, num_iters):
-    """Find top eigenvector of the averaged Hessian via power iteration.
-
-    For each power iteration step, loops over all batches, computes H_b @ v,
-    averages, and normalizes. Returns a unit vector u_avg.
-    """
-    v = torch.randn(n_params, device=device)
-    v = v / v.norm()
-    n_batches = len(batch_indices_list)
-    for _ in range(num_iters):
-        Hv_sum = torch.zeros(n_params, device=device)
-        for idx in batch_indices_list:
-            X_b = X[idx]
-            Y_b = Y[idx]
-            loss_b = loss_fn(net(X_b).squeeze(dim=-1), Y_b)
-            params_b = list(net.parameters())
-            grads_b = torch.autograd.grad(loss_b, params_b, create_graph=True)
-            grads_b_flat = flatt(grads_b)
-            hvp_b = create_hessian_vector_product(
-                loss_b, net, params=params_b, grads=grads_b, flat_grads=grads_b_flat,
-            )
-            try:
-                Hv_b = hvp_b(v, retain_graph_override=False).detach()
-            finally:
-                hvp_b.free_memory()
-            Hv_sum += Hv_b
-        Hv_avg = Hv_sum / n_batches
-        norm = Hv_avg.norm()
-        if norm < 1e-12:
-            break
-        v = Hv_avg / norm
-    return v
-
-
 def _power_iteration_top_eigenvector(hvp, n_params, device, num_iters):
     """Find top eigenvector of the Hessian via power iteration using an HVP operator."""
     v = torch.randn(n_params, device=device)
@@ -900,63 +847,26 @@ def _power_iteration_top_eigenvector(hvp, n_params, device, num_iters):
     return v
 
 
-def compute_gbs_actual_batch(net, X_batch, Y_batch, loss_fn, optimizer_wrapper, power_iters=50, compute_u=True):
-    """Compute GBS quantities on the actual training batch.
+def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size, n_probe=128, power_iters=50, u_full=None, lambda_max=None, return_distributions=False, grad_full=None, compute_uB=True):
+    """Compute GBS quantities over probe batches.
 
-    u is the top eigenvector of this single batch's Hessian.
-    Returns (A, A_u, B, B_u).
-    """
-    loss = loss_fn(net(X_batch).squeeze(dim=-1), Y_batch)
-    params = list(net.parameters())
-    grads = torch.autograd.grad(loss, params, create_graph=True)
-    grads_flat = flatt(grads)
+    For each probe batch (H, g, s all from that batch unless noted):
+      - A = gs, B = sHs  →  GBS = E[sHs / (-gs)]
+      - u  = per-batch top eigenvector (power iteration)
+        s_u = (s·u)u,  A_u = g·s_u,  B_u = s_u·H·s_u  →  GBS_u = E[B_u / (-A_u)]
+      - g_hat = g/||g||  (unit gradient)
+        s_g = (s·g_hat)g_hat,  A_g = g·s_g,  B_g = s_g·H·s_g  →  GBS_g = E[B_g / (-A_g)]
+      - u_full = fixed full-batch top eigenvector (normalised); lambda_max its eigenvalue.
+        c = s·u_full,  s_ufull = c·u_full
+        A_ufull = g·s_ufull = c·(g·u_full)           (per-batch g)
+        B_ufull = s_ufull·H_full·s_ufull = c²·lambda_max   (exact, no HVP needed)
+        GBS_ufull = E[B_ufull / (-A_ufull)]
+        Skipped (nan) when u_full or lambda_max is None.
 
-    s_b = optimizer_wrapper.compute_step_direction(grads_flat, params)
-
-    hvp = create_hessian_vector_product(
-        loss, net, params=params, grads=grads, flat_grads=grads_flat,
-    )
-    try:
-        Hs = hvp(s_b, retain_graph_override=True)
-        A = T.dot(grads_flat, s_b).item()
-        B = T.dot(s_b, Hs).item()
-    finally:
-        hvp.free_memory()
-
-    A_u, B_u = float('nan'), float('nan')
-    if compute_u:
-        # Fresh forward pass for power iteration
-        loss2 = loss_fn(net(X_batch).squeeze(dim=-1), Y_batch)
-        params2 = list(net.parameters())
-        grads2 = torch.autograd.grad(loss2, params2, create_graph=True)
-        grads2_flat = flatt(grads2)
-        hvp2 = create_hessian_vector_product(
-            loss2, net, params=params2, grads=grads2, flat_grads=grads2_flat,
-        )
-        try:
-            u = _power_iteration_top_eigenvector(hvp2, s_b.numel(), s_b.device, power_iters)
-            s_u = T.dot(s_b, u).item() * u
-            Hs_u = hvp2(s_u)
-            A_u = T.dot(grads_flat.detach(), s_u).item()
-            B_u = T.dot(s_u, Hs_u).item()
-        finally:
-            hvp2.free_memory()
-
-    out_actual   = B    / (-A)    if abs(A)    > 1e-12 else float('nan')
-    out_actual_u = B_u  / (-A_u)  if abs(A_u)  > 1e-12 else float('nan')
-    return A, A_u, B, B_u, out_actual, out_actual_u
-
-
-def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size, n_probe=128, power_iters=50, compute_u=True):
-    """Compute averaged GBS quantities over probe batches.
-
-    Two-pass approach:
-      Pass 1: compute u_avg = top eigenvector of the averaged Hessian over all probe batches.
-              (skipped when compute_u=False)
-      Pass 2: for each probe batch compute A, B (using per-batch s, g) and
-              A_u, B_u (using u_avg as the shared eigenvector direction).
-
-    Returns (mean_A, mean_A_u, mean_B, mean_B_u).
+    Returns (mean_A, mean_B, GBS, SBS,
+             mean_A_u, mean_B_u, GBS_u,
+             mean_A_g, mean_B_g, GBS_g,
+             mean_A_ufull, mean_B_ufull, GBS_ufull).
     """
     entropy_seed = int((time.time() * 1000000) % (2**32)) ^ os.getpid()
     rng = torch.Generator()
@@ -964,18 +874,23 @@ def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size,
 
     all_batch_indices = [T.randperm(len(X), generator=rng)[:batch_size] for _ in range(n_probe)]
 
-    # Pass 1: u_avg via averaged HVP power iteration
-    if compute_u:
-        n_params = sum(p.numel() for p in net.parameters())
-        device = next(net.parameters()).device
-        u_avg = _averaged_hvp_power_iteration(
-            net, X, Y, loss_fn, all_batch_indices, n_params, device, power_iters,
-        )
-    else:
-        u_avg = None
+    have_ufull   = (u_full is not None) and (lambda_max is not None)
+    have_gradfull = grad_full is not None
 
-    # Pass 2: compute quantities for each probe batch
-    A_vals, A_u_vals, B_vals, B_u_vals = [], [], [], []
+    g_full_hat = (grad_full / (grad_full.norm() + 1e-12)) if have_gradfull else None
+    gnorm_full_scalar = grad_full.norm().item() if have_gradfull else float('nan')
+
+    A_vals, B_vals, SBS_vals = [], [], []
+    A_u_vals, B_u_vals = [], []
+    A_g_vals, B_g_vals = [], []
+    A_gfull_vals, B_gfull_vals = [], []
+    A_ufull_vals, B_ufull_vals = [], []
+    A_cos_sBgB_vals, A_cos_sBgfull_vals, A_cos_gBgfull_vals = [], [], []
+
+    if return_distributions:
+        dist_gnorms, dist_snorms, dist_g_dot_s = [], [], []
+        dist_s_dot_u, dist_g_dot_u = [], []
+        dist_s_dot_ufull, dist_s_dot_gfull, dist_g_dot_gfull = [], [], []
 
     for random_idx in all_batch_indices:
         if batch_size > 128:
@@ -984,6 +899,7 @@ def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size,
         X_batch = X[random_idx]
         Y_batch = Y[random_idx]
 
+        # --- Pass 1: A and B ---
         loss = loss_fn(net(X_batch).squeeze(dim=-1), Y_batch)
         params = list(net.parameters())
         grads = torch.autograd.grad(loss, params, create_graph=True)
@@ -994,81 +910,156 @@ def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size,
             loss, net, params=params, grads=grads, flat_grads=grads_flat,
         )
         try:
-            Hs = hvp(s_b, retain_graph_override=True)
+            Hs = hvp(s_b, retain_graph_override=False)
             A_val = T.dot(grads_flat, s_b).item()
             B_val = T.dot(s_b, Hs).item()
+            s_norm_sq = T.dot(s_b, s_b).item()
         finally:
             hvp.free_memory()
 
-        A_u_val, B_u_val = float('nan'), float('nan')
-        if compute_u:
-            # A_u, B_u use u_avg — fresh forward pass
-            loss2 = loss_fn(net(X_batch).squeeze(dim=-1), Y_batch)
-            params2 = list(net.parameters())
-            grads2 = torch.autograd.grad(loss2, params2, create_graph=True)
-            grads2_flat = flatt(grads2)
-            hvp2 = create_hessian_vector_product(
-                loss2, net, params=params2, grads=grads2, flat_grads=grads2_flat,
-            )
-            try:
-                s_u = T.dot(s_b, u_avg).item() * u_avg
-                Hs_u = hvp2(s_u)
-                A_u_val = T.dot(grads_flat.detach(), s_u).item()
-                B_u_val = T.dot(s_u, Hs_u).item()
-            finally:
-                hvp2.free_memory()
-
         A_vals.append(A_val)
-        A_u_vals.append(A_u_val)
         B_vals.append(B_val)
+        SBS_vals.append(B_val / s_norm_sq if s_norm_sq > 1e-24 else float('nan'))
+
+        # --- Pass-1-derived scalars (no HVP needed) ---
+        g_norm_val = grads_flat.detach().norm().item()
+        s_norm_val = s_norm_sq ** 0.5
+        if have_gradfull:
+            s_dot_gf_val = T.dot(s_b.detach(), grad_full).item()
+            g_dot_gf_val = T.dot(grads_flat.detach(), grad_full).item()
+        else:
+            s_dot_gf_val = float('nan')
+            g_dot_gf_val = float('nan')
+
+        # A_cos: A rescaled by |cos| of the angle pair (denominator of GBS_cos variants)
+        A_cos_sBgB_vals.append(
+            A_val * abs(A_val / (g_norm_val * s_norm_val + 1e-12))
+        )
+        if have_gradfull:
+            A_cos_sBgfull_vals.append(
+                A_val * abs(s_dot_gf_val / (s_norm_val * gnorm_full_scalar + 1e-12))
+            )
+            A_cos_gBgfull_vals.append(
+                A_val * abs(g_dot_gf_val / (g_norm_val * gnorm_full_scalar + 1e-12))
+            )
+        else:
+            A_cos_sBgfull_vals.append(float('nan'))
+            A_cos_gBgfull_vals.append(float('nan'))
+
+        if return_distributions:
+            dist_gnorms.append(g_norm_val)
+            dist_snorms.append(s_norm_val)
+            dist_g_dot_s.append(A_val)
+            dist_s_dot_gfull.append(s_dot_gf_val)
+            dist_g_dot_gfull.append(g_dot_gf_val)
+
+        # --- Pass 2: A_u, B_u (per-batch power iteration) and A_g, B_g (unit gradient) ---
+        loss2 = loss_fn(net(X_batch).squeeze(dim=-1), Y_batch)
+        params2 = list(net.parameters())
+        grads2 = torch.autograd.grad(loss2, params2, create_graph=True)
+        grads2_flat = flatt(grads2)
+        g_hat = grads2_flat.detach() / (grads2_flat.detach().norm() + 1e-12)
+        hvp2 = create_hessian_vector_product(
+            loss2, net, params=params2, grads=grads2, flat_grads=grads2_flat,
+        )
+        try:
+            if compute_uB:
+                u = _power_iteration_top_eigenvector(hvp2, s_b.numel(), s_b.device, power_iters)
+                c_u = T.dot(s_b, u).item()
+                s_u = c_u * u
+                Hs_u = hvp2(s_u, retain_graph_override=True)   # keep graph for s_g (and s_gfull)
+                A_u_val = T.dot(grads2_flat.detach(), s_u).item()
+                B_u_val = T.dot(s_u, Hs_u).item()
+            else:
+                u = None
+                c_u = float('nan')
+                A_u_val = float('nan')
+                B_u_val = float('nan')
+
+            s_g = T.dot(s_b, g_hat).item() * g_hat
+            # keep graph if s_gfull still needs an HVP after this
+            Hs_g = hvp2(s_g, retain_graph_override=have_gradfull)
+            A_g_val = T.dot(grads2_flat.detach(), s_g).item()
+            B_g_val = T.dot(s_g, Hs_g).item()
+
+            if have_gradfull:
+                s_gfull = T.dot(s_b, g_full_hat).item() * g_full_hat
+                Hs_gfull = hvp2(s_gfull, retain_graph_override=False)  # last use, free graph
+                A_gfull_val = T.dot(grads2_flat.detach(), s_gfull).item()
+                B_gfull_val = T.dot(s_gfull, Hs_gfull).item()
+            else:
+                A_gfull_val = float('nan')
+                B_gfull_val = float('nan')
+        finally:
+            hvp2.free_memory()
+
+        A_u_vals.append(A_u_val)
         B_u_vals.append(B_u_val)
+        A_g_vals.append(A_g_val)
+        B_g_vals.append(B_g_val)
+        A_gfull_vals.append(A_gfull_val)
+        B_gfull_vals.append(B_gfull_val)
 
-    out_probe   = float(np.mean(np.array(B_vals)   / np.array([-a for a in A_vals])))
-    out_probe_u = float(np.mean(np.array(B_u_vals) / np.array([-a for a in A_u_vals]))) if compute_u else float('nan')
-    return (float(np.mean(A_vals)), float(np.mean(A_u_vals)) if compute_u else float('nan'),
-            float(np.mean(B_vals)), float(np.mean(B_u_vals)) if compute_u else float('nan'),
-            out_probe, out_probe_u)
+        if return_distributions:
+            if compute_uB and u is not None:
+                dist_s_dot_u.append(c_u)
+                dist_g_dot_u.append(T.dot(grads_flat.detach(), u).item())
+            else:
+                dist_s_dot_u.append(float('nan'))
+                dist_g_dot_u.append(float('nan'))
 
+        # --- A_ufull, B_ufull: exact via eigenvalue equation, no HVP needed ---
+        if have_ufull:
+            c = T.dot(s_b, u_full).item()
+            A_ufull_val = c * T.dot(grads_flat.detach(), u_full).item()
+            B_ufull_val = c * c * lambda_max
+        else:
+            c = float('nan')
+            A_ufull_val, B_ufull_val = float('nan'), float('nan')
 
-def compute_gbs_full_batch(net, X_full, Y_full, X_batch, Y_batch, loss_fn, optimizer_wrapper, u, compute_u=True):
-    """Compute GBS quantities using actual batch for g/s, full-batch Hessian for B.
+        if return_distributions:
+            dist_s_dot_ufull.append(c)
 
-    u is the pre-computed top eigenvector of the full-batch Hessian (e.g. from lambda_max).
-    Returns (A_full, A_u_full, B_full, B_u_full, out_full, out_full_u).
-    """
-    # Get g and s from actual training batch
-    loss_batch = loss_fn(net(X_batch).squeeze(dim=-1), Y_batch)
-    params = list(net.parameters())
-    grads_batch = T.autograd.grad(loss_batch, params, create_graph=False)
-    grads_batch_flat = flatt(grads_batch).detach()
-    s = optimizer_wrapper.compute_step_direction(grads_batch_flat, params)
+        A_ufull_vals.append(A_ufull_val)
+        B_ufull_vals.append(B_ufull_val)
 
-    # Full-batch HVP for B computation
-    loss_full = loss_fn(net(X_full).squeeze(dim=-1), Y_full)
-    params_full = list(net.parameters())
-    grads_full = T.autograd.grad(loss_full, params_full, create_graph=True)
-    grads_full_flat = flatt(grads_full)
-    hvp = create_hessian_vector_product(
-        loss_full, net, params=params_full, grads=grads_full, flat_grads=grads_full_flat,
-    )
-    A_u_full, B_u_full = float('nan'), float('nan')
-    try:
-        retain = compute_u and (u is not None)
-        Hs = hvp(s, retain_graph_override=retain)
-        A_full = T.dot(grads_batch_flat, s).item()
-        B_full = T.dot(s, Hs).item()
-
-        if compute_u and u is not None:
-            s_u = T.dot(s, u).item() * u
-            Hs_u = hvp(s_u)
-            A_u_full = T.dot(grads_batch_flat, s_u).item()
-            B_u_full = T.dot(s_u, Hs_u).item()
-    finally:
-        hvp.free_memory()
-
-    out_full   = B_full   / (-A_full)   if abs(A_full)   > 1e-12 else float('nan')
-    out_full_u = B_u_full / (-A_u_full) if abs(A_u_full) > 1e-12 else float('nan')
-    return A_full, A_u_full, B_full, B_u_full, out_full, out_full_u
+    SBS       = float(np.nanmean(np.array(SBS_vals)))
+    GBS       = float(np.mean(np.array(B_vals)       / np.array([-a for a in A_vals])))
+    GBS_u     = float(np.mean(np.array(B_u_vals)     / np.array([-a for a in A_u_vals])))
+    GBS_g     = float(np.mean(np.array(B_g_vals)     / np.array([-a for a in A_g_vals])))
+    GBS_gfull = (float(np.mean(np.array(B_gfull_vals) / np.array([-a for a in A_gfull_vals])))
+                 if have_gradfull else float('nan'))
+    GBS_ufull = (float(np.mean(np.array(B_ufull_vals) / np.array([-a for a in A_ufull_vals])))
+                 if have_ufull else float('nan'))
+    GBS_cos_sBgB    = float(np.mean(np.array(B_vals) / np.array([-a for a in A_cos_sBgB_vals])))
+    GBS_cos_sBgfull = (float(np.mean(np.array(B_vals) / np.array([-a for a in A_cos_sBgfull_vals])))
+                       if have_gradfull else float('nan'))
+    GBS_cos_gBgfull = (float(np.mean(np.array(B_vals) / np.array([-a for a in A_cos_gBgfull_vals])))
+                       if have_gradfull else float('nan'))
+    scalars = (float(np.mean(A_vals)),    float(np.mean(B_vals)),    GBS,    SBS,
+               float(np.mean(A_u_vals)),  float(np.mean(B_u_vals)),  GBS_u,
+               float(np.mean(A_g_vals)),  float(np.mean(B_g_vals)),  GBS_g,
+               float(np.nanmean(A_gfull_vals)), float(np.nanmean(B_gfull_vals)), GBS_gfull,
+               float(np.mean(A_ufull_vals)) if have_ufull else float('nan'),
+               float(np.mean(B_ufull_vals)) if have_ufull else float('nan'),
+               GBS_ufull,
+               float(np.nanmean(A_cos_sBgB_vals)),    GBS_cos_sBgB,
+               float(np.nanmean(A_cos_sBgfull_vals)), GBS_cos_sBgfull,
+               float(np.nanmean(A_cos_gBgfull_vals)), GBS_cos_gBgfull)
+    if return_distributions:
+        distributions = {
+            'gnorms':       np.array(dist_gnorms),
+            'snorms':       np.array(dist_snorms),
+            'g_dot_s':      np.array(dist_g_dot_s),
+            's_dot_u':      np.array(dist_s_dot_u),
+            'g_dot_u':      np.array(dist_g_dot_u),
+            's_dot_ufull':  np.array(dist_s_dot_ufull),
+            's_dot_gfull':  np.array(dist_s_dot_gfull),
+            'g_dot_gfull':  np.array(dist_g_dot_gfull),
+            'gnorm_full':   np.float32(grad_full.norm().item() if have_gradfull else float('nan')),
+        }
+        return scalars, distributions
+    return scalars, None
 
 
 ################################################################################
@@ -1289,12 +1280,6 @@ def _compute_gauss_newton_power_iteration(
             if Gv_norm.item() == 0:
                 break
             v = Gv / Gv_norm
-
-    iterations_run = (i + 1) if "i" in locals() else 0
-    try:
-        wandb.log({"power_iteration_iterations": iterations_run}, commit=False)
-    except Exception:
-        pass
 
     if eigenvector_cache is not None:
         eigenvector_cache.store_eigenvector(v.detach(), eigenval)

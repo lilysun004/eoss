@@ -7,11 +7,16 @@ from typing import Any, Mapping
 
 RESULTS_COLUMNS = [
     "epoch", "step", "batch_loss", "full_loss",
-    "lambda_max", "step_sharpness", "batch_sharpness",
-    "A_actual", "A_u_actual", "B_actual", "B_u_actual", "out_actual", "out_actual_u",
-    "A_probe", "A_u_probe", "B_probe", "B_u_probe", "out_probe", "out_probe_u",
-    "A_full", "A_u_full", "B_full", "B_u_full", "out_full", "out_full_u",
-    "total_accuracy",
+    "lmax", "step_sharpness", "batch_sharpness",
+    "A", "B", "GBS", "SBS",
+    "A_u", "B_u", "GBS_u",
+    "A_g", "B_g", "GBS_g",
+    "A_gfull", "B_gfull", "GBS_gfull",
+    "A_ufull", "B_ufull", "GBS_ufull",
+    "A_cos_sBgB", "GBS_cos_sBgB",
+    "A_cos_sBgfull", "GBS_cos_sBgfull",
+    "A_cos_gBgfull", "GBS_cos_gBgfull",
+    "full_accuracy",
 ]
 
 

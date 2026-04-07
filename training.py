@@ -14,10 +14,6 @@ from utils.data import prepare_dataset, get_dataset_presets
 from utils.nets import SquaredLoss, MLP, CNN, prepare_net, initialize_net, get_model_presets
 from utils.nets import ResNet, WideResNet, WideResNetNoBN
 from utils.storage import initialize_folders, write_json_atomic
-from utils.wandb_utils import (
-    save_checkpoint_wandb,
-    generate_run_id,
-)
 from utils.measure import (
     EigenvectorCache,
     param_length,
@@ -25,9 +21,7 @@ from utils.measure import (
     compute_eigenvalues,
     compute_grad_H_grad,
     calculate_averaged_grad_H_grad_step,
-    compute_gbs_actual_batch,
     compute_gbs_probe_batches,
-    compute_gbs_full_batch,
     calculate_accuracy,
 )
 from utils.frequency import frequency_calculator, MeasurementContext
@@ -54,11 +48,11 @@ class MeasurementRunner:
         eigenvector_cache,
         num_eigenvalues,
         use_power_iteration,
-        step_to_start,
-        run_id,
         probe_samples,
-        gbs_power_iters,
-        compute_u=True,
+        power_iters,
+        compute_distributions,
+        distributions_file,
+        compute_quantities_with_uB=True,
     ):
         self.net = net
         self.optimizer = optimizer
@@ -70,11 +64,12 @@ class MeasurementRunner:
         self.eigenvector_cache = eigenvector_cache
         self.num_eigenvalues = num_eigenvalues
         self.use_power_iteration = use_power_iteration
-        self.step_to_start = step_to_start
-        self.run_id = run_id
         self.probe_samples = probe_samples
-        self.gbs_power_iters = gbs_power_iters
-        self.compute_u = compute_u
+        self.power_iters = power_iters
+        self.compute_distributions = compute_distributions
+        self.distributions_file = distributions_file
+        self.compute_quantities_with_uB = compute_quantities_with_uB
+        self._dist_records = []
 
         self.eigenvalues_log = []
         if 'lmax' in measurements and num_eigenvalues > 1:
@@ -85,6 +80,12 @@ class MeasurementRunner:
             self.eigenvalues_file = None
 
     def close(self):
+        if self._dist_records:
+            keys = [k for k in self._dist_records[0] if k != 'step']
+            payload = {'steps': np.array([r['step'] for r in self._dist_records])}
+            for k in keys:
+                payload[k] = np.stack([r[k] for r in self._dist_records])
+            np.savez(self.distributions_file, **payload)
         if self.eigenvalues_file is not None:
             self.eigenvalues_file.write('\n]')
             self.eigenvalues_file.close()
@@ -103,24 +104,28 @@ class MeasurementRunner:
         metrics = {
             'step_sharpness': np.nan,
             'batch_sharpness': np.nan,
-            'A_actual': np.nan,
-            'A_u_actual': np.nan,
-            'B_actual': np.nan,
-            'B_u_actual': np.nan,
-            'out_actual': np.nan,
-            'out_actual_u': np.nan,
-            'A_probe': np.nan,
-            'A_u_probe': np.nan,
-            'B_probe': np.nan,
-            'B_u_probe': np.nan,
-            'out_probe': np.nan,
-            'out_probe_u': np.nan,
-            'A_full': np.nan,
-            'A_u_full': np.nan,
-            'B_full': np.nan,
-            'B_u_full': np.nan,
-            'out_full': np.nan,
-            'out_full_u': np.nan,
+            'A': np.nan,
+            'B': np.nan,
+            'GBS': np.nan,
+            'SBS': np.nan,
+            'A_u': np.nan,
+            'B_u': np.nan,
+            'GBS_u': np.nan,
+            'A_g': np.nan,
+            'B_g': np.nan,
+            'GBS_g': np.nan,
+            'A_gfull': np.nan,
+            'B_gfull': np.nan,
+            'GBS_gfull': np.nan,
+            'A_ufull': np.nan,
+            'B_ufull': np.nan,
+            'GBS_ufull': np.nan,
+            'A_cos_sBgB': np.nan,
+            'GBS_cos_sBgB': np.nan,
+            'A_cos_sBgfull': np.nan,
+            'GBS_cos_sBgfull': np.nan,
+            'A_cos_gBgfull': np.nan,
+            'GBS_cos_gBgfull': np.nan,
             'full_accuracy': np.nan,
             'full_loss': np.nan,
             'lmax': np.nan,
@@ -143,38 +148,6 @@ class MeasurementRunner:
                     eps=0.005,
                 )
 
-        # ----- Actual-batch GBS -----
-        if 'actual_batch_gbs' in self.measurements:
-            if frequency_calculator.should_measure('actual_batch_gbs', ctx):
-                A, A_u, B, B_u, out_actual, out_actual_u = compute_gbs_actual_batch(
-                    self.net, X_batch, Y_batch, self.loss_fn, self.optimizer,
-                    power_iters=self.gbs_power_iters,
-                    compute_u=self.compute_u,
-                )
-                metrics['A_actual'] = A
-                metrics['A_u_actual'] = A_u
-                metrics['B_actual'] = B
-                metrics['B_u_actual'] = B_u
-                metrics['out_actual'] = out_actual
-                metrics['out_actual_u'] = out_actual_u
-
-        # ----- Probe-batch GBS -----
-        if 'probe_batch_gbs' in self.measurements:
-            if frequency_calculator.should_measure('probe_batch_gbs', ctx):
-                A, A_u, B, B_u, out_probe, out_probe_u = compute_gbs_probe_batches(
-                    self.net, self.X, self.Y, self.loss_fn, self.optimizer,
-                    batch_size=self.batch_size,
-                    n_probe=self.probe_samples,
-                    power_iters=self.gbs_power_iters,
-                    compute_u=self.compute_u,
-                )
-                metrics['A_probe'] = A
-                metrics['A_u_probe'] = A_u
-                metrics['B_probe'] = B
-                metrics['B_u_probe'] = B_u
-                metrics['out_probe'] = out_probe
-                metrics['out_probe_u'] = out_probe_u
-
         # ----- Instantaneous step sharpness (current-batch Rayleigh quotient) -----
         if 'step_sharpness' in self.measurements:
             if frequency_calculator.should_measure('step_sharpness', ctx):
@@ -183,7 +156,7 @@ class MeasurementRunner:
                 loss = self.loss_fn(preds, Y_batch)
                 metrics['step_sharpness'] = compute_grad_H_grad(loss, self.net).item()
 
-        # ----- Eigenvalues/Lambda max (full batch) -----
+        # ----- Eigenvalues/Lambda max (full batch) — runs before probe GBS so u_full is fresh -----
         lmax_now = False
         if 'lmax' in self.measurements:
             measurement_type = 'full_batch_lambda_max'
@@ -276,20 +249,85 @@ class MeasurementRunner:
 
             epoch_loss_update = metrics['full_loss']
 
-            # ----- Full-batch GBS (reuses X_subset, Y_subset, and u from eigenvector cache) -----
-            if 'full_batch_gbs' in self.measurements and self.eigenvector_cache is not None:
-                u = self.eigenvector_cache.eigenvectors[0]
-                A_f, A_u_f, B_f, B_u_f, out_f, out_f_u = compute_gbs_full_batch(
-                    self.net, X_subset, Y_subset, X_batch, Y_batch,
-                    self.loss_fn, self.optimizer, u,
-                    compute_u=self.compute_u,
+        # ----- Probe-batch GBS (after lmax so u_full is fresh from eigenvector cache) -----
+        if 'probe_batch_gbs' in self.measurements:
+            if frequency_calculator.should_measure('probe_batch_gbs', ctx):
+                u_full = (self.eigenvector_cache.eigenvectors[0]
+                          if self.eigenvector_cache and self.eigenvector_cache.eigenvectors
+                          else None)
+                lambda_max_cached = (self.eigenvector_cache.eigenvalues[0]
+                                     if self.eigenvector_cache and self.eigenvector_cache.eigenvalues
+                                     else None)
+                save_dist = (self.compute_distributions and
+                             frequency_calculator.should_measure('distributions', ctx))
+
+                # Compute full-batch gradient every probe step (same subset cap as lmax)
+                lmax_max_size = 4096
+                if str(self.device).startswith('cuda'):
+                    total_memory = torch.cuda.get_device_properties(0).total_memory
+                    if total_memory < 20 * 1024**3:
+                        if isinstance(self.net, CNN):
+                            lmax_max_size = 2048 + 512
+                        if isinstance(self.net, ResNet):
+                            lmax_max_size = 512
+                        if isinstance(self.net, WideResNet) or isinstance(self.net, WideResNetNoBN):
+                            lmax_max_size = 1024
+                if len(self.X) > lmax_max_size:
+                    idx = gimme_random_subset_idx(len(self.X), lmax_max_size)
+                    X_gf = self.X[idx]
+                    Y_gf = self.Y[idx]
+                else:
+                    X_gf, Y_gf = self.X, self.Y
+                self.net.zero_grad()
+                _preds_gf = self.net(X_gf).squeeze(dim=-1)
+                _loss_gf = self.loss_fn(_preds_gf, Y_gf)
+                _loss_gf.backward()
+                grad_full = torch.cat([p.grad.flatten() for p in self.net.parameters()]).detach()
+                self.net.zero_grad()
+
+                scalars, distributions = compute_gbs_probe_batches(
+                    self.net, self.X, self.Y, self.loss_fn, self.optimizer,
+                    batch_size=self.batch_size,
+                    n_probe=self.probe_samples,
+                    power_iters=self.power_iters,
+                    u_full=u_full,
+                    lambda_max=lambda_max_cached,
+                    return_distributions=save_dist,
+                    grad_full=grad_full,
+                    compute_uB=self.compute_quantities_with_uB,
                 )
-                metrics['A_full'] = A_f
-                metrics['A_u_full'] = A_u_f
-                metrics['B_full'] = B_f
-                metrics['B_u_full'] = B_u_f
-                metrics['out_full'] = out_f
-                metrics['out_full_u'] = out_f_u
+                (A, B, GBS, SBS,
+                 A_u, B_u, GBS_u,
+                 A_g, B_g, GBS_g,
+                 A_gfull, B_gfull, GBS_gfull,
+                 A_ufull, B_ufull, GBS_ufull,
+                 A_cos_sBgB, GBS_cos_sBgB,
+                 A_cos_sBgfull, GBS_cos_sBgfull,
+                 A_cos_gBgfull, GBS_cos_gBgfull) = scalars
+                if save_dist and distributions is not None:
+                    self._dist_records.append({'step': step_number, **distributions})
+                metrics['A'] = A
+                metrics['B'] = B
+                metrics['GBS'] = GBS
+                metrics['SBS'] = SBS
+                metrics['A_u'] = A_u
+                metrics['B_u'] = B_u
+                metrics['GBS_u'] = GBS_u
+                metrics['A_g'] = A_g
+                metrics['B_g'] = B_g
+                metrics['GBS_g'] = GBS_g
+                metrics['A_gfull'] = A_gfull
+                metrics['B_gfull'] = B_gfull
+                metrics['GBS_gfull'] = GBS_gfull
+                metrics['A_ufull'] = A_ufull
+                metrics['B_ufull'] = B_ufull
+                metrics['GBS_ufull'] = GBS_ufull
+                metrics['A_cos_sBgB'] = A_cos_sBgB
+                metrics['GBS_cos_sBgB'] = GBS_cos_sBgB
+                metrics['A_cos_sBgfull'] = A_cos_sBgfull
+                metrics['GBS_cos_sBgfull'] = GBS_cos_sBgfull
+                metrics['A_cos_gBgfull'] = A_cos_gBgfull
+                metrics['GBS_cos_gBgfull'] = GBS_cos_gBgfull
 
         if 'full_loss_warmup' in self.measurements:
             if frequency_calculator.should_measure('full_loss_warmup', ctx):
@@ -336,17 +374,14 @@ def train(
             permute=True,
             data_ordering_seed=None,
             stop_loss=None,
-            epoch_to_start=0,
-            step_to_start=0,
             measurements: set = {},
             cache_eigenvectors: bool = True,
             use_power_iteration: bool = False,
             num_eigenvalues: int = 1,
-            checkpoint_every_n_steps: int = None,
-            run_id: str = None,
             probe_samples: int = 128,
-            gbs_power_iters: int = 50,
-            compute_u: bool = True,
+            power_iters: int = 50,
+            compute_distributions: bool = False,
+            compute_quantities_with_uB: bool = True,
             ):
 
     # -------------------------------------
@@ -354,8 +389,6 @@ def train(
     # -------------------------------------
     start_time = time.time()
     print(f"Training started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))}")
-
-    NET_SAVES_PER_TRAINING = 100
 
     assert max_epochs is not None or max_steps is not None
     if max_epochs is None:
@@ -383,8 +416,6 @@ def train(
     # ----- Storage Preparation -----
     save_to.mkdir(parents=True, exist_ok=True)
 
-    model_save_path = save_to / 'checkpoints'
-
     results_file = save_to / 'results.txt'
     if device == 'cpu':
         results_file = open(results_file, 'a', buffering=1)
@@ -393,21 +424,14 @@ def train(
         results_file = open(results_file, 'a', buffering=1_000)
 
     # ----- State Initialization -----
-    step_number = -1 if step_to_start == 0 else step_to_start
+    step_number = -1
     steps_since_restart = -1
-
-    # ----- Checkpoint Interval Selection -----
-    if checkpoint_every_n_steps is None:
-        checkpoint_every_n_steps = max(max_steps // NET_SAVES_PER_TRAINING, 1)
-    print(f"Will save checkpoints every {checkpoint_every_n_steps} steps")
 
     # ----- Print active measurements -----
     measurement_names = {
         'lmax': 'lambda_max',
         'batch_sharpness': 'batch_sharpness',
-        'actual_batch_gbs': 'actual_batch_gbs',
         'probe_batch_gbs': 'probe_batch_gbs',
-        'full_batch_gbs': 'full_batch_gbs',
         'step_sharpness': 'step_sharpness',
         'full_loss': 'full_loss',
         'full_loss_warmup': 'full_loss_warmup',
@@ -416,9 +440,7 @@ def train(
     freq_keys = {
         'lmax': 'full_batch_lambda_max',
         'batch_sharpness': 'batch_sharpness',
-        'actual_batch_gbs': 'actual_batch_gbs',
         'probe_batch_gbs': 'probe_batch_gbs',
-        'full_batch_gbs': 'full_batch_lambda_max',  # fires at same time as lmax
         'step_sharpness': 'step_sharpness',
         'full_loss': 'full_loss',
     }
@@ -439,7 +461,7 @@ def train(
     # ----- Training State Trackers -----
     epoch_loss = float('+inf')
     stop_training = False
-    completed_epoch = epoch_to_start - 1
+    completed_epoch = -1
 
     # ----- Eigenvector Cache Setup -----
     eigenvector_cache = None
@@ -449,8 +471,8 @@ def train(
             max_cache = max(max_cache, num_eigenvalues)
         eigenvector_cache = EigenvectorCache(max_eigenvectors=max_cache)
 
-    # ----- Run Identification -----
-    run_id = run_id or generate_run_id()
+    # ----- Distributions File -----
+    distributions_file = save_to / 'distributions.npz'
 
     # ----- Measurement Runner Wiring -----
     measurement_runner = MeasurementRunner(
@@ -465,11 +487,11 @@ def train(
         eigenvector_cache=eigenvector_cache,
         num_eigenvalues=num_eigenvalues,
         use_power_iteration=use_power_iteration,
-        step_to_start=step_to_start,
-        run_id=run_id,
         probe_samples=probe_samples,
-        gbs_power_iters=gbs_power_iters,
-        compute_u=compute_u,
+        power_iters=power_iters,
+        compute_distributions=compute_distributions,
+        distributions_file=distributions_file,
+        compute_quantities_with_uB=compute_quantities_with_uB,
     )
 
     # -------------------------------------
@@ -480,10 +502,7 @@ def train(
                 desc="Training", unit="step", dynamic_ncols=True,
                 file=sys.stderr)
 
-    def _status(text):
-        pbar.set_postfix_str(text, refresh=False)
-
-    for epoch in range(epoch_to_start, max_epochs):
+    for epoch in range(0, max_epochs):
         completed_epoch = epoch
 
         if step_number >= max_steps:
@@ -509,14 +528,8 @@ def train(
         if stop_training:
             break
 
-        # initialize the correct starting point for the batch picking
-        location_within_epoch = 0
-        if epoch == epoch_to_start:
-            steps_per_epoch = len(X) // batch_size
-            if step_to_start > 0:
-                location_within_epoch = step_to_start % steps_per_epoch
-
         # --- Minibatch Iteration ---
+        location_within_epoch = 0
         for i in range(location_within_epoch, len(X) // batch_size):
             step_number += 1
             steps_since_restart += 1
@@ -564,7 +577,6 @@ def train(
                 epoch_loss = metrics['epoch_loss_update']
 
             if stop_loss is not None and epoch_loss < stop_loss:
-                _status(f"Loss {epoch_loss} below stop_loss {stop_loss}, stopping")
                 stop_training = True
                 break
 
@@ -582,6 +594,7 @@ def train(
                 pbar.close()
                 results_file.flush()
                 results_file.close()
+                measurement_runner.close()
                 raise ValueError("Loss is inf or NaN, stopping the training")
 
             loss.backward()
@@ -592,17 +605,6 @@ def train(
             batch_loss = loss.item()
             losses_in_epoch.append(batch_loss)
 
-            # --- Checkpoint Handling ---
-            checkpoint_path = save_checkpoint_wandb(
-                model=net,
-                optimizer=optimizer,
-                step=step_number,
-                epoch=epoch,
-                loss=batch_loss,
-                run_id=run_id,
-                save_every_n_steps=checkpoint_every_n_steps
-            )
-
             # -------------------------------------
             # Section: Logging (Step)
             # -------------------------------------
@@ -610,14 +612,17 @@ def train(
                 f"{batch_loss},{metrics['full_loss']},"
                 f"{metrics['lmax']},{metrics['step_sharpness']},"
                 f"{metrics['batch_sharpness']},"
-                f"{metrics['A_actual']},{metrics['A_u_actual']},{metrics['B_actual']},{metrics['B_u_actual']},{metrics['out_actual']},{metrics['out_actual_u']},"
-                f"{metrics['A_probe']},{metrics['A_u_probe']},{metrics['B_probe']},{metrics['B_u_probe']},{metrics['out_probe']},{metrics['out_probe_u']},"
-                f"{metrics['A_full']},{metrics['A_u_full']},{metrics['B_full']},{metrics['B_u_full']},{metrics['out_full']},{metrics['out_full_u']},"
+                f"{metrics['A']},{metrics['B']},{metrics['GBS']},{metrics['SBS']},"
+                f"{metrics['A_u']},{metrics['B_u']},{metrics['GBS_u']},"
+                f"{metrics['A_g']},{metrics['B_g']},{metrics['GBS_g']},"
+                f"{metrics['A_gfull']},{metrics['B_gfull']},{metrics['GBS_gfull']},"
+                f"{metrics['A_ufull']},{metrics['B_ufull']},{metrics['GBS_ufull']},"
+                f"{metrics['A_cos_sBgB']},{metrics['GBS_cos_sBgB']},"
+                f"{metrics['A_cos_sBgfull']},{metrics['GBS_cos_sBgfull']},"
+                f"{metrics['A_cos_gBgfull']},{metrics['GBS_cos_gBgfull']},"
                 f"{metrics['full_accuracy']}"
             )
             results_file.write(msg + "\n")
-
-            _status(f"ep {epoch}  step {step_number}  loss={batch_loss:.4f}")
 
             pbar.update(1)
 
@@ -629,21 +634,6 @@ def train(
 
     pbar.close()
 
-
-    # -------------------------------------
-    # Section: Logging
-    # -------------------------------------
-    # ----- Final Checkpoint Save -----
-    final_checkpoint_path = save_checkpoint_wandb(
-        model=net,
-        optimizer=optimizer,
-        step=step_number,
-        epoch=epoch,
-        loss=batch_loss,
-        run_id=run_id,
-        save_every_n_steps=1
-    )
-    print(f"Final checkpoint saved: {final_checkpoint_path}")
 
     results_file.close()
 
@@ -745,7 +735,6 @@ def train(
             "subset_size": int(len(X_subset)),
             "num_eigenvalues": int(num_eigenvalues),
             "use_power_iteration": bool(use_power_iteration),
-            "run_id": run_id,
             "timestamp": timestamp,
         }
 

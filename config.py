@@ -11,12 +11,6 @@ from utils.data import prepare_dataset, get_dataset_presets
 from utils.nets import SquaredLoss, prepare_net, initialize_net, get_model_presets
 from utils.optimizer import create_optimizer
 from utils.storage import initialize_folders
-from utils.wandb_utils import (
-    find_closest_checkpoint_wandb,
-    load_checkpoint_wandb,
-    get_checkpoint_dir_for_run,
-    generate_run_id,
-)
 from utils.frequency import frequency_calculator
 from training import train
 
@@ -49,10 +43,11 @@ optimizer_params   = {}
 #   SGD-Momentum: {'beta': 0.9}
 #   SGD-Nesterov: {'beta': 0.9}
 #   Adam:         {'beta1': 0.9, 'beta2': 0.999, 'eps': 1e-8}  (all optional, these are defaults)
+
 probe_samples      = 128       # number of probe batches for batch_sharpness and probe GBS
 stop_loss          = 0.00001      # early-stop when loss drops below this; None = disabled
 gpu                = 0         # which GPU to use (0 or 1); None = default; 'cpu' = force CPU
-results_subfolder  = '0311_alloptimizers'      # save inside RES_FOLDER/results_subfolder/; None = RES_FOLDER directly
+results_subfolder  = '0318_alloptimizers_targeted_finebatch'      # save inside RES_FOLDER/results_subfolder/; None = RES_FOLDER directly
 
 # --- Loss ---
 loss_type          = 'mse'     # 'mse' (SquaredLoss) | 'ce' (CrossEntropyLoss)
@@ -67,27 +62,22 @@ init_scale         = 0.2       # weight initialization scale
 no_init            = False     # True = skip custom weight initialization
 
 # --- Measurements (True/False to enable/disable) ---
-compute_full_batch          = True    # compute GBS using actual batch g/s + full-batch Hessian u
-compute_full_batch_every    = 256   # also controls lambdamax frequency (must be the same)
-
-lambdamax          = True      # compute lambda_max (top Hessian eigenvalue on full batch)
-lambdamax_every    = compute_full_batch_every  # keep in sync with compute_full_batch_every
-
-batch_sharpness    = True      # E[gHg/g^2] averaged over probe_samples mini-batches
 full_loss_every    = 32
 
-compute_actual_batch        = True    # compute A, A_u, B, B_u on the actual training batch
-compute_actual_batch_every  = 1     # actual-batch GBS at every step
+batch_sharpness             = True      # E[gHg/g^2] averaged over probe_samples mini-batches
+batch_sharpness_every       = 256
 
-compute_probe_batch         = True    # compute A, A_u, B, B_u averaged over probe_samples batches (u = u_avg)
+compute_probe_batch         = True    # compute A, B, GBS_out averaged over probe_samples batches
 compute_probe_batch_every   = 256   # probe-batch GBS + batch_sharpness every N steps
+power_iters                 = 50    # power iteration steps to find per-batch top eigenvector u
 
-gbs_power_iters     = 50       # power iteration steps to find top eigenvector u
-compute_u           = False     # False = skip A_u/B_u projections (saves ~2x per GBS step); lambda_max still computed normally
+compute_distributions       = True  # save per-probe-batch arrays of ||g||, ||s||, g·s, s·u, g·u
+
+compute_quantities_with_uB  = False  # False = skip per-batch power iteration + A_u/B_u/GBS_u/s_dot_u/g_dot_u
 
 # --- Additional measurements ---
 step_sharpness     = False     # single-batch Rayleigh quotient gHg/g^2
-step_sharpness_every       = 16
+step_sharpness_every  = 16
 final              = False     # extra lambda_max measurement after training ends
 force_full_loss    = False     # periodic full-batch loss & accuracy logging
 full_loss_warmup   = False     # full-batch loss every step for first ~128 steps after start
@@ -96,14 +86,6 @@ full_loss_warmup   = False     # full-batch loss every step for first ~128 steps
 cache_eigenvectors  = True     # warm-start eigenvector cache for faster eigenvalue computation
 use_power_iteration = False    # True = power iteration; False = LOBPCG
 num_eigenvalues     = 1        # number of top eigenvalues to compute (1 = just lambda_max)
-
-# --- Checkpoints ---
-checkpoint_every    = None     # save every N steps; None = auto (total_steps / 100)
-save_only_last      = True    # True = skip intermediate checkpoints
-
-# --- Continuation from a previous run ---
-cont_run_id         = None     # run ID to resume from; None = fresh run
-cont_step           = None     # step to resume from (must set both or neither)
 
 # --- Seeds (all fixed for determinism) ---
 seed               = 88881     # global torch/numpy/random seed
@@ -161,25 +143,19 @@ if __name__ == '__main__':
     if steps is not None and epochs is not None:
         raise ValueError("Set either epochs or steps, not both")
 
-    if (cont_run_id is not None) != (cont_step is not None):
-        raise ValueError("Both cont_run_id and cont_step must be set together")
-
     # ----- Measurement frequencies -----
-    frequency_calculator.set_interval('full_batch_lambda_max', lambdamax_every)
-    frequency_calculator.set_interval('batch_sharpness', compute_probe_batch_every)
-    frequency_calculator.set_interval('actual_batch_gbs', compute_actual_batch_every)
+    frequency_calculator.set_interval('full_batch_lambda_max', compute_probe_batch_every)
+    frequency_calculator.set_interval('batch_sharpness', batch_sharpness_every)
     frequency_calculator.set_interval('probe_batch_gbs', compute_probe_batch_every)
+    frequency_calculator.set_interval('distributions', compute_probe_batch_every)
     frequency_calculator.set_interval('step_sharpness', step_sharpness_every)
     frequency_calculator.set_interval('full_loss', full_loss_every)
 
     # ----- Measurements -----
-    measurements = {name for name, enabled in [
-        ('lmax', lambdamax),
+    measurements = {'lmax'} | {name for name, enabled in [
         ('step_sharpness', step_sharpness),
         ('batch_sharpness', batch_sharpness),
-        ('actual_batch_gbs', compute_actual_batch),
         ('probe_batch_gbs', compute_probe_batch),
-        ('full_batch_gbs', compute_full_batch),
         ('final', final),
         ('full_loss_warmup', full_loss_warmup),
         ('full_loss', force_full_loss),
@@ -205,23 +181,6 @@ if __name__ == '__main__':
     if not no_init:
         initialize_net(net, scale=init_scale, seed=init_seed)
 
-    # ----- Checkpoint Continuation -----
-    step_to_start = 0
-    epoch_to_start = 0
-    if cont_run_id is not None and cont_step is not None:
-        checkpoint_dir = get_checkpoint_dir_for_run(cont_run_id)
-        if checkpoint_dir is None:
-            raise FileNotFoundError(f"Cannot find checkpoint directory for run ID: {cont_run_id}")
-
-        checkpoint_info = find_closest_checkpoint_wandb(cont_step, checkpoint_dir=checkpoint_dir)
-        if checkpoint_info is None:
-            raise FileNotFoundError(f"No suitable checkpoint found for step {cont_step} in run {cont_run_id}")
-
-        loaded_data = load_checkpoint_wandb(checkpoint_info, net)
-        step_to_start = loaded_data['step']
-        epoch_to_start = loaded_data['epoch']
-        print(f"Loaded checkpoint from step {loaded_data['step']} (epoch {loaded_data['epoch']}) from run {cont_run_id}")
-
     # ----- Optimizer -----
     optimizer = create_optimizer(optimizer_name, net, lr, optimizer_params)
 
@@ -231,21 +190,12 @@ if __name__ == '__main__':
         dataset=dataset, num_data=num_data, model=model,
         init_scale=init_scale, optimizer_name=optimizer_name,
         optimizer_params=optimizer_params, probe_samples=probe_samples,
-        cont_run_id=cont_run_id, cont_step=cont_step,
     )
 
     # ----- Result Storage -----
     save_root = RES_FOLDER / results_subfolder if results_subfolder else RES_FOLDER
     save_root.mkdir(parents=True, exist_ok=True)
     run_folder = initialize_folders(args, save_root)
-
-    # ----- Run ID -----
-    run_id = generate_run_id()
-
-    # ----- Checkpoint Cadence -----
-    checkpoint_every_n_steps = checkpoint_every
-    if len(measurements) == 0 or (len(measurements) == 1 and 'final' in measurements) or save_only_last:
-        checkpoint_every_n_steps = 1_000_000_000
 
     # ----- Train -----
     train(
@@ -260,16 +210,13 @@ if __name__ == '__main__':
         loss_fn=loss_fn,
         verbose=True,
         stop_loss=stop_loss,
-        epoch_to_start=epoch_to_start,
-        step_to_start=step_to_start,
         measurements=measurements,
         cache_eigenvectors=cache_eigenvectors,
         use_power_iteration=use_power_iteration,
         num_eigenvalues=num_eigenvalues,
-        checkpoint_every_n_steps=checkpoint_every_n_steps,
         data_ordering_seed=data_ordering_seed,
-        run_id=run_id,
         probe_samples=probe_samples,
-        gbs_power_iters=gbs_power_iters,
-        compute_u=compute_u,
+        power_iters=power_iters,
+        compute_distributions=compute_distributions,
+        compute_quantities_with_uB=compute_quantities_with_uB,
     )
