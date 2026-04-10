@@ -87,6 +87,12 @@ cache_eigenvectors  = True     # warm-start eigenvector cache for faster eigenva
 use_power_iteration = False    # True = power iteration; False = LOBPCG
 num_eigenvalues     = 1        # number of top eigenvalues to compute (1 = just lambda_max)
 
+# --- Projection histogram tracking ---
+# Set both to enable tracking of <theta_t, v> projections at the edge of stability.
+# CLI: python config.py --track_from 5000 --track_until 6000
+track_from          = 20000    # step to start recording projections (None = disabled)
+track_until         = 30000    # step to stop recording projections (None = disabled)
+
 # --- Seeds (all fixed for determinism) ---
 seed               = 88881     # global torch/numpy/random seed
 dataset_seed       = 888       # seed for dataset subsampling
@@ -219,4 +225,6 @@ if __name__ == '__main__':
         power_iters=power_iters,
         compute_distributions=compute_distributions,
         compute_quantities_with_uB=compute_quantities_with_uB,
+        track_from=track_from,
+        track_until=track_until,
     )

@@ -25,6 +25,7 @@ from utils.measure import (
     calculate_accuracy,
 )
 from utils.frequency import frequency_calculator, MeasurementContext
+from utils.projection_tracker import ProjectionTracker
 
 
 # -------------------------------------
@@ -382,6 +383,8 @@ def train(
             power_iters: int = 50,
             compute_distributions: bool = False,
             compute_quantities_with_uB: bool = True,
+            track_from: int | None = None,
+            track_until: int | None = None,
             ):
 
     # -------------------------------------
@@ -494,6 +497,21 @@ def train(
         compute_quantities_with_uB=compute_quantities_with_uB,
     )
 
+    # ----- Projection Tracker -----
+    projection_tracker = None
+    if track_from is not None and track_until is not None:
+        projection_tracker = ProjectionTracker(
+            net=net,
+            X=X,
+            Y=Y,
+            loss_fn=loss_fn,
+            track_from=track_from,
+            track_until=track_until,
+            save_dir=save_to,
+            device=device,
+        )
+        print(f"Projection tracking enabled for steps {track_from}–{track_until}")
+
     # -------------------------------------
     # Section: Training Step
     # -------------------------------------
@@ -599,7 +617,16 @@ def train(
 
             loss.backward()
 
+            # --- Projection Tracking (pre-step) ---
+            _theta_before = None
+            if projection_tracker is not None and projection_tracker.should_track(step_number):
+                _theta_before = projection_tracker.pre_step(step_number, X_batch, Y_batch, loss)
+
             optimizer.step()
+
+            # --- Projection Tracking (post-step: record Δθ) ---
+            if projection_tracker is not None and _theta_before is not None:
+                projection_tracker.post_step(step_number, _theta_before)
 
             # Handle loss value
             batch_loss = loss.item()
@@ -636,6 +663,9 @@ def train(
 
 
     results_file.close()
+
+    if projection_tracker is not None:
+        projection_tracker.save()
 
     measurement_runner.close()
 
