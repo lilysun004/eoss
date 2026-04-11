@@ -93,6 +93,9 @@ num_eigenvalues     = 1        # number of top eigenvalues to compute (1 = just 
 track_from          = 20000    # step to start recording projections (None = disabled)
 track_until         = 30000    # step to stop recording projections (None = disabled)
 
+# --- Measurement frequency ---
+more_freq_measure   = False    # True = halve all measurement intervals
+
 # --- Seeds (all fixed for determinism) ---
 seed               = 88881     # global torch/numpy/random seed
 dataset_seed       = 888       # seed for dataset subsampling
@@ -150,12 +153,13 @@ if __name__ == '__main__':
         raise ValueError("Set either epochs or steps, not both")
 
     # ----- Measurement frequencies -----
-    frequency_calculator.set_interval('full_batch_lambda_max', compute_probe_batch_every)
-    frequency_calculator.set_interval('batch_sharpness', batch_sharpness_every)
-    frequency_calculator.set_interval('probe_batch_gbs', compute_probe_batch_every)
-    frequency_calculator.set_interval('distributions', compute_probe_batch_every)
-    frequency_calculator.set_interval('step_sharpness', step_sharpness_every)
-    frequency_calculator.set_interval('full_loss', full_loss_every)
+    freq_div = 2 if more_freq_measure else 1
+    frequency_calculator.set_interval('full_batch_lambda_max', compute_probe_batch_every // freq_div)
+    frequency_calculator.set_interval('batch_sharpness',       batch_sharpness_every // freq_div)
+    frequency_calculator.set_interval('probe_batch_gbs',       compute_probe_batch_every // freq_div)
+    frequency_calculator.set_interval('distributions',         compute_probe_batch_every // freq_div)
+    frequency_calculator.set_interval('step_sharpness',        step_sharpness_every // freq_div)
+    frequency_calculator.set_interval('full_loss',             full_loss_every // freq_div)
 
     # ----- Measurements -----
     measurements = {'lmax'} | {name for name, enabled in [

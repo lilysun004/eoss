@@ -8,33 +8,40 @@ from .measure import (
     gimme_random_subset_idx,
     compute_eigenvalues,
     EigenvectorCache,
+    HessianVectorProduct,
+    create_hessian_vector_product,
+    param_length,
 )
 from utils.nets import CNN, ResNet, WideResNet, WideResNetNoBN
 
 
 class ProjectionTracker:
     """
-    Tracks the projection of the parameter vector theta_t onto five dynamically-
+    Tracks the projection of the parameter vector theta_t onto dynamically-
     relevant directions at each training step within a user-specified window.
 
-    Directions tracked:
-      1. E[g_t]  — full-batch gradient (approximated with a random subset)
+    Standard directions (all optimizers):
+      1. E[g_t]  — full-batch gradient (random subset approximation)
       2. g_t     — current mini-batch gradient
-      3. h_t     — raw parameter change Δθ = θ_{t+1} − θ_t  (filled in post-step)
-      4. w_t     — top eigenvector of the full (approximated) Hessian
-      5. w_b_t   — top eigenvector of the batch Hessian (current training mini-batch)
+      3. h_t     — raw parameter change Δθ = θ_{t+1} − θ_t
+      4. w_t     — top eigenvector of the full (subset) Hessian
+      5. w_b_t   — top eigenvector of the batch Hessian
+
+    Extra directions (Adam / RMSProp only, i.e. when optimizer has a preconditioner):
+      6. w_p_t   — top eigenvector of D^{-1/2} H D^{-1/2} (preconditioned full Hessian)
+      7. w_pb_t  — top eigenvector of D^{-1/2} H_B D^{-1/2} (preconditioned batch Hessian)
+
+    For (6) and (7), the eigenvalue λ_max(D^{-1/2} H D^{-1/2}) is also recorded and
+    can be plotted in the training curve to show preconditioned sharpness over time.
 
     Usage in training loop:
-        # after loss.backward(), before optimizer.step():
         theta_before = tracker.pre_step(step_number, X_batch, Y_batch, batch_loss)
-
         optimizer.step()
-
-        # after optimizer.step():
         tracker.post_step(step_number, theta_before)
     """
 
-    def __init__(self, net, X, Y, loss_fn, track_from, track_until, save_dir, device):
+    def __init__(self, net, X, Y, loss_fn, track_from, track_until,
+                 save_dir, device, optimizer_wrapper=None):
         self.net = net
         self.X = X
         self.Y = Y
@@ -43,32 +50,50 @@ class ProjectionTracker:
         self.track_until = track_until
         self.save_dir = Path(save_dir)
         self.device = device
+        self._optimizer_wrapper = optimizer_wrapper
+        self._has_preconditioner = (
+            optimizer_wrapper is not None and
+            callable(getattr(optimizer_wrapper, 'get_preconditioner_inv_sqrt', None))
+        )
 
-        # Separate eigenvector caches for full-Hessian and batch-Hessian (warm starts)
-        self._eigvec_cache_full = EigenvectorCache(max_eigenvectors=1)
-        self._eigvec_cache_batch = EigenvectorCache(max_eigenvectors=1)
+        # Warm-start eigenvector caches
+        self._eigvec_cache_full          = EigenvectorCache(max_eigenvectors=1)
+        self._eigvec_cache_batch         = EigenvectorCache(max_eigenvectors=1)
+        self._eigvec_cache_precond_full  = EigenvectorCache(max_eigenvectors=1)
+        self._eigvec_cache_precond_batch = EigenvectorCache(max_eigenvectors=1)
 
-        # Storage arrays
-        self._steps: list[int] = []
-        self._proj_g_full: list[float] = []
-        self._proj_g: list[float] = []
-        self._proj_h: list[float] = []
-        self._proj_w: list[float] = []
-        self._proj_wb: list[float] = []
+        # Storage
+        self._steps:         list[int]   = []
+        self._proj_g_full:   list[float] = []
+        self._proj_g:        list[float] = []
+        self._proj_h:        list[float] = []
+        self._proj_w:        list[float] = []
+        self._proj_wb:       list[float] = []
+        self._proj_w_precond:  list[float] = []
+        self._proj_wb_precond: list[float] = []
+        self._lambda_precond:  list[float] = []   # λ_max(D^{-1/2} H D^{-1/2})
+        self._lambda_precond_batch: list[float] = []
 
-        # Temporary per-step state set in pre_step, consumed in post_step
-        self._pending_theta_t: torch.Tensor | None = None
-        self._pending_g_full: torch.Tensor | None = None
-        self._pending_g_t: torch.Tensor | None = None
-        self._pending_w_t: torch.Tensor | None = None
-        self._pending_wb_t: torch.Tensor | None = None
-        self._pending_step: int | None = None
+        # Temporary per-step state
+        self._pending_step:      int | None          = None
+        self._pending_theta_t:   torch.Tensor | None = None
+        self._pending_g_t:       torch.Tensor | None = None
+        self._pending_g_full:    torch.Tensor | None = None
+        self._pending_w_t:       torch.Tensor | None = None
+        self._pending_wb_t:      torch.Tensor | None = None
+        self._pending_w_precond:   torch.Tensor | None = None
+        self._pending_wb_precond:  torch.Tensor | None = None
+        self._pending_lam_precond: float | None = None
+        self._pending_lam_precond_batch: float | None = None
 
     def should_track(self, step: int) -> bool:
         return self.track_from <= step <= self.track_until
 
+    # ------------------------------------------------------------------ #
+    #  Subset selection                                                    #
+    # ------------------------------------------------------------------ #
+
     def _get_subset_cap(self) -> int:
-        """Mirror the subset-size cap logic used by MeasurementRunner for lmax."""
         cap = 4096
         if str(self.device).startswith('cuda'):
             try:
@@ -85,7 +110,6 @@ class ProjectionTracker:
         return cap
 
     def _get_subset(self):
-        """Return a (possibly capped) random subset of the training data."""
         cap = self._get_subset_cap()
         N = len(self.X)
         if N > cap:
@@ -93,27 +117,96 @@ class ProjectionTracker:
             return self.X[idx], self.Y[idx]
         return self.X, self.Y
 
+    # ------------------------------------------------------------------ #
+    #  Standard power iteration (for Hessian eigenvectors)                #
+    # ------------------------------------------------------------------ #
+
+    def _power_iteration(self, loss, cache, max_iters=50, reltol=0.005):
+        """Return (eigenvalue, eigenvector) for the top eigenvector of H."""
+        _, w = compute_eigenvalues(
+            loss, self.net,
+            k=1,
+            max_iterations=max_iters,
+            reltol=reltol,
+            eigenvector_cache=cache,
+            return_eigenvectors=True,
+            use_power_iteration=True,
+        )
+        # Retrieve the eigenvalue stored in cache by the power iteration
+        lam = cache.eigenvalues[0] if cache.eigenvalues else float('nan')
+        if torch.is_tensor(lam):
+            lam = lam.item()
+        return lam, w.detach().clone()
+
+    # ------------------------------------------------------------------ #
+    #  Preconditioned power iteration for D^{-1/2} H D^{-1/2}            #
+    # ------------------------------------------------------------------ #
+
+    def _precond_power_iteration(self, loss, cache, D_inv_sqrt,
+                                  max_iters=50, reltol=0.005):
+        """Return (eigenvalue, eigenvector) for the top eigenvector of D^{-1/2} H D^{-1/2}.
+
+        Matvec: v → D^{-1/2} H (D^{-1/2} v)
+        """
+        hvp = create_hessian_vector_product(loss, self.net, retain_graph=True)
+        n = param_length(self.net)
+        d = D_inv_sqrt.to(self.device)
+
+        try:
+            # Warm start from cache
+            if cache.eigenvectors:
+                v = cache.eigenvectors[0].to(self.device).detach()
+            else:
+                v = torch.randn(n, device=self.device, dtype=d.dtype)
+
+            with torch.no_grad():
+                v = v / v.norm()
+
+            eigenval = 0.0
+            for _ in range(max_iters):
+                # Preconditioned matvec: D^{-1/2} H D^{-1/2} v
+                u = d * v
+                Hu = hvp(u).detach()
+                pHv = d * Hu
+
+                with torch.no_grad():
+                    rq = torch.dot(pHv, v) / torch.dot(v, v)
+                    eigenval = rq
+
+                    if rq.abs() < 1e-12:
+                        break
+                    residual = pHv - rq * v
+                    if residual.norm() / rq.abs() < reltol:
+                        break
+                    v = pHv / pHv.norm()
+
+            v = v.detach().clone()
+            cache.store_eigenvector(v, eigenval)
+            lam = eigenval.item() if torch.is_tensor(eigenval) else float(eigenval)
+            return lam, v
+
+        finally:
+            hvp.free_memory()
+
+    # ------------------------------------------------------------------ #
+    #  pre_step / post_step                                                #
+    # ------------------------------------------------------------------ #
+
     def pre_step(self, step: int, X_batch: torch.Tensor, Y_batch: torch.Tensor,
                  batch_loss: torch.Tensor) -> torch.Tensor:
-        """
-        Called after loss.backward(), before optimizer.step().
+        """Call after loss.backward(), before optimizer.step()."""
 
-        Captures θ_t, g_t, E[g_t], w_t, w_b_t and stashes them for post_step.
-
-        Returns theta_before (so the caller can pass it to post_step without
-        re-computing it).
-        """
-        # 1. Capture θ_t and g_t before doing anything that could modify .grad
+        # 1. Capture θ_t and g_t
         theta_t = param_vector(self.net).detach().clone()
         g_t = grads_vector(self.net).detach().clone()
 
-        # Save original .grad tensors so we can restore them after computing g_full_t
+        # Save original .grad so optimizer.step() is unaffected
         saved_grads = [
             p.grad.detach().clone() if p.grad is not None else None
             for p in self.net.parameters()
         ]
 
-        # 2. Compute g_full_t — full-batch gradient on a random subset
+        # 2. Full-batch gradient (random subset)
         X_sub, Y_sub = self._get_subset()
         self.net.zero_grad()
         with torch.enable_grad():
@@ -122,73 +215,88 @@ class ProjectionTracker:
             loss_sub.backward()
         g_full_t = grads_vector(self.net).detach().clone()
 
-        # Restore original mini-batch .grad values so optimizer.step() is unaffected
+        # Restore mini-batch grads
         for p, g in zip(self.net.parameters(), saved_grads):
             p.grad = g
 
-        # 3. Compute w_t — top eigenvector of the full (subset) Hessian
-        #    Use power iteration with warm starts: at EoS the eigenvector changes
-        #    slowly, so warm-started power iteration converges in very few iters.
+        # 3. w_t — top eigenvector of full Hessian (new graph)
         with torch.enable_grad():
             preds_sub2 = self.net(X_sub).squeeze(dim=-1)
             loss_sub2 = self.loss_fn(preds_sub2, Y_sub)
-        _, w_t = compute_eigenvalues(
-            loss_sub2, self.net,
-            k=1,
-            max_iterations=50,
-            reltol=0.005,
-            eigenvector_cache=self._eigvec_cache_full,
-            return_eigenvectors=True,
-            use_power_iteration=True,
-        )
-        w_t = w_t.detach().clone()
+        _, w_t = self._power_iteration(loss_sub2, self._eigvec_cache_full)
 
-        # 4. Compute w_b_t — top eigenvector of the batch Hessian
-        #    Recompute the batch loss to get a fresh computation graph
+        # 4. w_b_t — top eigenvector of batch Hessian
         with torch.enable_grad():
             preds_b = self.net(X_batch).squeeze(dim=-1)
             loss_b = self.loss_fn(preds_b, Y_batch)
-        _, w_b_t = compute_eigenvalues(
-            loss_b, self.net,
-            k=1,
-            max_iterations=50,
-            reltol=0.005,
-            eigenvector_cache=self._eigvec_cache_batch,
-            return_eigenvectors=True,
-            use_power_iteration=True,
-        )
-        self._eigvec_cache_batch.store_eigenvector(w_b_t.detach())
-        w_b_t = w_b_t.detach().clone()
+        _, w_b_t = self._power_iteration(loss_b, self._eigvec_cache_batch)
+
+        # 5. Preconditioned eigenvectors (Adam / RMSProp only)
+        w_precond = None
+        w_b_precond = None
+        lam_precond = float('nan')
+        lam_precond_batch = float('nan')
+
+        if self._has_preconditioner:
+            D_inv_sqrt = self._optimizer_wrapper.get_preconditioner_inv_sqrt()
+            if D_inv_sqrt is not None:
+                # Full preconditioned Hessian eigenvector
+                with torch.enable_grad():
+                    preds_p = self.net(X_sub).squeeze(dim=-1)
+                    loss_p = self.loss_fn(preds_p, Y_sub)
+                lam_precond, w_precond = self._precond_power_iteration(
+                    loss_p, self._eigvec_cache_precond_full, D_inv_sqrt)
+
+                # Batch preconditioned Hessian eigenvector
+                with torch.enable_grad():
+                    preds_pb = self.net(X_batch).squeeze(dim=-1)
+                    loss_pb = self.loss_fn(preds_pb, Y_batch)
+                lam_precond_batch, w_b_precond = self._precond_power_iteration(
+                    loss_pb, self._eigvec_cache_precond_batch, D_inv_sqrt)
 
         # Stash for post_step
-        self._pending_step = step
-        self._pending_theta_t = theta_t
-        self._pending_g_t = g_t
-        self._pending_g_full = g_full_t
-        self._pending_w_t = w_t
-        self._pending_wb_t = w_b_t
+        self._pending_step           = step
+        self._pending_theta_t        = theta_t
+        self._pending_g_t            = g_t
+        self._pending_g_full         = g_full_t
+        self._pending_w_t            = w_t
+        self._pending_wb_t           = w_b_t
+        self._pending_w_precond      = w_precond
+        self._pending_wb_precond     = w_b_precond
+        self._pending_lam_precond    = lam_precond
+        self._pending_lam_precond_batch = lam_precond_batch
 
         return theta_t
 
     def post_step(self, step: int, theta_before: torch.Tensor):
-        """
-        Called after optimizer.step().
-
-        Computes h_t = Δθ = θ_{t+1} − θ_t and records all five projections.
-        """
+        """Call after optimizer.step()."""
         assert self._pending_step == step, "post_step called for wrong step"
 
         theta_after = param_vector(self.net).detach()
         h_t = theta_after - theta_before
-
         theta_t = self._pending_theta_t
 
+        dot = torch.dot
+
         self._steps.append(step)
-        self._proj_g_full.append(torch.dot(theta_t, self._pending_g_full).item())
-        self._proj_g.append(torch.dot(theta_t, self._pending_g_t).item())
-        self._proj_h.append(torch.dot(theta_t, h_t).item())
-        self._proj_w.append(torch.dot(theta_t, self._pending_w_t).item())
-        self._proj_wb.append(torch.dot(theta_t, self._pending_wb_t).item())
+        self._proj_g_full.append(dot(theta_t, self._pending_g_full).item())
+        self._proj_g.append(dot(theta_t, self._pending_g_t).item())
+        self._proj_h.append(dot(theta_t, h_t).item())
+        self._proj_w.append(dot(theta_t, self._pending_w_t).item())
+        self._proj_wb.append(dot(theta_t, self._pending_wb_t).item())
+
+        if self._pending_w_precond is not None:
+            self._proj_w_precond.append(dot(theta_t, self._pending_w_precond).item())
+        else:
+            self._proj_w_precond.append(float('nan'))
+
+        if self._pending_wb_precond is not None:
+            self._proj_wb_precond.append(dot(theta_t, self._pending_wb_precond).item())
+        else:
+            self._proj_wb_precond.append(float('nan'))
+
+        self._lambda_precond.append(self._pending_lam_precond)
+        self._lambda_precond_batch.append(self._pending_lam_precond_batch)
 
         # Clear stash
         self._pending_step = None
@@ -197,6 +305,10 @@ class ProjectionTracker:
         self._pending_g_full = None
         self._pending_w_t = None
         self._pending_wb_t = None
+        self._pending_w_precond = None
+        self._pending_wb_precond = None
+        self._pending_lam_precond = None
+        self._pending_lam_precond_batch = None
 
     def save(self):
         """Save all recorded projections to projections.npz in save_dir."""
@@ -208,11 +320,15 @@ class ProjectionTracker:
         np.savez(
             out_path,
             steps=np.array(self._steps, dtype=np.int64),
-            proj_g_full=np.array(self._proj_g_full, dtype=np.float32),
-            proj_g=np.array(self._proj_g, dtype=np.float32),
-            proj_h=np.array(self._proj_h, dtype=np.float32),
-            proj_w=np.array(self._proj_w, dtype=np.float32),
-            proj_wb=np.array(self._proj_wb, dtype=np.float32),
+            proj_g_full=np.array(self._proj_g_full,    dtype=np.float32),
+            proj_g=np.array(self._proj_g,              dtype=np.float32),
+            proj_h=np.array(self._proj_h,              dtype=np.float32),
+            proj_w=np.array(self._proj_w,              dtype=np.float32),
+            proj_wb=np.array(self._proj_wb,            dtype=np.float32),
+            proj_w_precond=np.array(self._proj_w_precond,   dtype=np.float32),
+            proj_wb_precond=np.array(self._proj_wb_precond, dtype=np.float32),
+            lambda_precond=np.array(self._lambda_precond,   dtype=np.float32),
+            lambda_precond_batch=np.array(self._lambda_precond_batch, dtype=np.float32),
             track_from=np.int64(self.track_from),
             track_until=np.int64(self.track_until),
         )

@@ -35,6 +35,10 @@ class OptimizerWrapper:
         Must be implemented by subclasses."""
         raise NotImplementedError
 
+    def get_preconditioner_inv_sqrt(self):
+        """Return D^{-1/2} as a flat tensor, or None if this optimizer has no preconditioner."""
+        return None
+
 
 class SGDOptimizer(OptimizerWrapper):
     name = "SGD"
@@ -164,6 +168,24 @@ class AdamOptimizer(OptimizerWrapper):
 
             offset += length
 
+        return torch.cat(pieces).detach()
+
+    def get_preconditioner_inv_sqrt(self):
+        """Return D^{-1/2} where D = diag(sqrt(v_hat) + eps), or None if state uninitialized."""
+        beta2 = self.beta2
+        eps = self.eps
+        pieces = []
+        for p in self.inner.param_groups[0]['params']:
+            state = self.inner.state.get(p)
+            if state and 'exp_avg_sq' in state:
+                v = state['exp_avg_sq']
+                t = state['step'].item() if torch.is_tensor(state['step']) else state['step']
+                v_hat = v / (1 - beta2 ** t)
+                d = v_hat.sqrt() + eps          # D diagonal
+                pieces.append((1.0 / d.sqrt()).view(-1))
+            else:
+                # State not initialized yet
+                return None
         return torch.cat(pieces).detach()
 
 
@@ -311,11 +333,64 @@ class MuonOptimizer(OptimizerWrapper):
         return torch.cat(pieces).detach()
 
 
+class RMSPropOptimizer(OptimizerWrapper):
+    name = "RMSProp"
+
+    def __init__(self, net, lr, beta2=0.99, eps=1e-8):
+        self.beta2 = beta2
+        self.eps = eps
+        inner = T.optim.RMSprop(net.parameters(), lr=lr, alpha=beta2, eps=eps)
+        super().__init__(inner)
+
+    def compute_step_direction(self, grads_flat, params):
+        lr = self.param_groups[0]['lr']
+        beta2 = self.beta2
+        eps = self.eps
+
+        offset = 0
+        pieces = []
+        for p in params:
+            length = p.numel()
+            g_p = grads_flat[offset:offset + length].view(p.shape)
+
+            state = self.inner.state.get(p)
+            if state and 'square_avg' in state:
+                v = state['square_avg']
+                v_new = beta2 * v + (1 - beta2) * g_p * g_p
+                denom = v_new.sqrt() + eps
+                pieces.append((-lr * g_p / denom).view(-1))
+            else:
+                # First step: v=0
+                v_new = (1 - beta2) * g_p * g_p
+                denom = v_new.sqrt() + eps
+                pieces.append((-lr * g_p / denom).view(-1))
+
+            offset += length
+
+        return torch.cat(pieces).detach()
+
+    def get_preconditioner_inv_sqrt(self):
+        """Return D^{-1/2} where D = diag(sqrt(v) + eps), or None if state uninitialized."""
+        beta2 = self.beta2
+        eps = self.eps
+        pieces = []
+        for p in self.inner.param_groups[0]['params']:
+            state = self.inner.state.get(p)
+            if state and 'square_avg' in state:
+                v = state['square_avg']
+                d = v.sqrt() + eps              # D diagonal
+                pieces.append((1.0 / d.sqrt()).view(-1))
+            else:
+                return None
+        return torch.cat(pieces).detach()
+
+
 _REGISTRY = {
     'SGD': SGDOptimizer,
     'SGD-Momentum': SGDMomentumOptimizer,
     'SGD-Nesterov': SGDNesterovOptimizer,
     'Adam': AdamOptimizer,
+    'RMSProp': RMSPropOptimizer,
     'Muon': MuonOptimizer,
 }
 
