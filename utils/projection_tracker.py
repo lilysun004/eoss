@@ -127,20 +127,20 @@ class ProjectionTracker:
             p.grad = g
 
         # 3. Compute w_t — top eigenvector of the full (subset) Hessian
-        #    Reuse loss_sub computed above (graph still alive because retain_graph is
-        #    handled inside HessianVectorProduct via autograd.grad, not .backward)
+        #    Use power iteration with warm starts: at EoS the eigenvector changes
+        #    slowly, so warm-started power iteration converges in very few iters.
         with torch.enable_grad():
             preds_sub2 = self.net(X_sub).squeeze(dim=-1)
             loss_sub2 = self.loss_fn(preds_sub2, Y_sub)
         _, w_t = compute_eigenvalues(
             loss_sub2, self.net,
             k=1,
-            max_iterations=100,
+            max_iterations=50,
             reltol=0.005,
             eigenvector_cache=self._eigvec_cache_full,
             return_eigenvectors=True,
+            use_power_iteration=True,
         )
-        self._eigvec_cache_full.store_eigenvector(w_t.detach())
         w_t = w_t.detach().clone()
 
         # 4. Compute w_b_t — top eigenvector of the batch Hessian
@@ -151,10 +151,11 @@ class ProjectionTracker:
         _, w_b_t = compute_eigenvalues(
             loss_b, self.net,
             k=1,
-            max_iterations=100,
+            max_iterations=50,
             reltol=0.005,
             eigenvector_cache=self._eigvec_cache_batch,
             return_eigenvectors=True,
+            use_power_iteration=True,
         )
         self._eigvec_cache_batch.store_eigenvector(w_b_t.detach())
         w_b_t = w_b_t.detach().clone()

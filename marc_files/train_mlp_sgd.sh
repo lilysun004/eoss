@@ -9,14 +9,14 @@
 #SBATCH -e /n/home06/mwalden/eoss/marc_files/logs/mlp_sgd_%j.err
 
 source ~/.bashrc
-conda activate eoss
+conda activate eoss || source ~/.conda/envs/eoss/etc/conda/activate.d/*.sh 2>/dev/null
 
 export DATASETS=/n/holylabs/LABS/kdbrantley_lab/Lab/mwalden/datasets
 export RESULTS=/n/holylabs/LABS/kdbrantley_lab/Lab/mwalden/results
 
 cd /n/home06/mwalden/eoss
 
-python config.py \
+/n/home06/mwalden/.conda/envs/eoss/bin/python config.py \
     --model mlp \
     --optimizer_name SGD \
     --lr 0.02 \
