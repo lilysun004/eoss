@@ -509,6 +509,7 @@ def train(
             track_until=track_until,
             save_dir=save_to,
             device=device,
+            optimizer_wrapper=optimizer,
         )
         print(f"Projection tracking enabled for steps {track_from}–{track_until}")
 

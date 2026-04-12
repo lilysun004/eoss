@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J eoss_bsweep
-#SBATCH -p kempner_h100
+#SBATCH -p kempner_requeue
 #SBATCH -A kempner_kdbrantley_lab
 #SBATCH -c 16
 #SBATCH --gres=gpu:1
