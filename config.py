@@ -92,6 +92,7 @@ num_eigenvalues     = 1        # number of top eigenvalues to compute (1 = just 
 # CLI: python config.py --track_from 5000 --track_until 6000
 track_from          = 20000    # step to start recording projections (None = disabled)
 track_until         = 30000    # step to stop recording projections (None = disabled)
+fixed_u             = False    # True = fix top Hessian eigenvec at track_from and reuse
 
 # --- Measurement frequency ---
 more_freq_measure   = False    # True = halve all measurement intervals
@@ -231,4 +232,5 @@ if __name__ == '__main__':
         compute_quantities_with_uB=compute_quantities_with_uB,
         track_from=track_from,
         track_until=track_until,
+        fixed_u=fixed_u,
     )

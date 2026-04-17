@@ -21,18 +21,22 @@ class ProjectionTracker:
     relevant directions at each training step within a user-specified window.
 
     Standard directions (all optimizers):
-      1. E[g_t]  — full-batch gradient (random subset approximation)
-      2. g_t     — current mini-batch gradient
-      3. h_t     — raw parameter change Δθ = θ_{t+1} − θ_t
-      4. w_t     — top eigenvector of the full (subset) Hessian
-      5. w_b_t   — top eigenvector of the batch Hessian
+      1. E[g_t]     — full-batch gradient (random subset approximation)
+      2. g_t        — current mini-batch gradient
+      3. h_t        — raw parameter change Δθ = θ_{t+1} − θ_t
+      4. u_from     — top eigenvector of full Hessian fixed at track_from (if fixed_u=True)
+      5. w_t        — top eigenvector of the full (subset) Hessian (per-step)
+      6. w_b_t      — top eigenvector of the batch Hessian (per-step)
 
     Extra directions (Adam / RMSProp only, i.e. when optimizer has a preconditioner):
-      6. w_p_t   — top eigenvector of D^{-1/2} H D^{-1/2} (preconditioned full Hessian)
-      7. w_pb_t  — top eigenvector of D^{-1/2} H_B D^{-1/2} (preconditioned batch Hessian)
+      7. ũ_from     — top eigenvec of D^{-1/2}HD^{-1/2} fixed at track_from (if fixed_u=True)
+      8. w_p_t      — top eigenvector of D^{-1/2} H D^{-1/2} (per-step)
+      9. w_pb_t     — top eigenvector of D^{-1/2} H_B D^{-1/2} (per-step)
 
-    For (6) and (7), the eigenvalue λ_max(D^{-1/2} H D^{-1/2}) is also recorded and
-    can be plotted in the training curve to show preconditioned sharpness over time.
+    For (8) and (9), the eigenvalue λ_max(D^{-1/2} H D^{-1/2}) is also recorded.
+
+    fixed_u=True: compute top eigenvectors once at track_from, reuse for all steps.
+    This tests Lily's hypothesis that the instability direction is stable across time.
 
     Usage in training loop:
         theta_before = tracker.pre_step(step_number, X_batch, Y_batch, batch_loss)
@@ -41,7 +45,7 @@ class ProjectionTracker:
     """
 
     def __init__(self, net, X, Y, loss_fn, track_from, track_until,
-                 save_dir, device, optimizer_wrapper=None):
+                 save_dir, device, optimizer_wrapper=None, fixed_u: bool = False):
         self.net = net
         self.X = X
         self.Y = Y
@@ -55,6 +59,11 @@ class ProjectionTracker:
             optimizer_wrapper is not None and
             callable(getattr(optimizer_wrapper, 'get_preconditioner_inv_sqrt', None))
         )
+        self._fixed_u = fixed_u
+
+        # Fixed eigenvectors captured at track_from (only used when fixed_u=True)
+        self._fixed_u_vec:        torch.Tensor | None = None
+        self._fixed_u_precond_vec: torch.Tensor | None = None
 
         # Warm-start eigenvector caches
         self._eigvec_cache_full          = EigenvectorCache(max_eigenvectors=1)
@@ -62,16 +71,18 @@ class ProjectionTracker:
         self._eigvec_cache_precond_full  = EigenvectorCache(max_eigenvectors=1)
         self._eigvec_cache_precond_batch = EigenvectorCache(max_eigenvectors=1)
 
-        # Storage
-        self._steps:         list[int]   = []
-        self._proj_g_full:   list[float] = []
-        self._proj_g:        list[float] = []
-        self._proj_h:        list[float] = []
-        self._proj_w:        list[float] = []
-        self._proj_wb:       list[float] = []
-        self._proj_w_precond:  list[float] = []
-        self._proj_wb_precond: list[float] = []
-        self._lambda_precond:  list[float] = []   # λ_max(D^{-1/2} H D^{-1/2})
+        # Storage (ordering: g_full, g, h, w_fixed, w, wb, w_precond_fixed, w_precond, wb_precond)
+        self._steps:               list[int]   = []
+        self._proj_g_full:         list[float] = []
+        self._proj_g:              list[float] = []
+        self._proj_h:              list[float] = []
+        self._proj_w_fixed:        list[float] = []
+        self._proj_w:              list[float] = []
+        self._proj_wb:             list[float] = []
+        self._proj_w_precond_fixed: list[float] = []
+        self._proj_w_precond:      list[float] = []
+        self._proj_wb_precond:     list[float] = []
+        self._lambda_precond:       list[float] = []
         self._lambda_precond_batch: list[float] = []
 
         # Temporary per-step state
@@ -225,6 +236,10 @@ class ProjectionTracker:
             loss_sub2 = self.loss_fn(preds_sub2, Y_sub)
         _, w_t = self._power_iteration(loss_sub2, self._eigvec_cache_full)
 
+        # Capture fixed full-Hessian eigenvector at the first tracked step
+        if self._fixed_u and self._fixed_u_vec is None:
+            self._fixed_u_vec = w_t.clone()
+
         # 4. w_b_t — top eigenvector of batch Hessian
         with torch.enable_grad():
             preds_b = self.net(X_batch).squeeze(dim=-1)
@@ -246,6 +261,10 @@ class ProjectionTracker:
                     loss_p = self.loss_fn(preds_p, Y_sub)
                 lam_precond, w_precond = self._precond_power_iteration(
                     loss_p, self._eigvec_cache_precond_full, D_inv_sqrt)
+
+                # Capture fixed preconditioned eigenvector at the first tracked step
+                if self._fixed_u and self._fixed_u_precond_vec is None:
+                    self._fixed_u_precond_vec = w_precond.clone()
 
                 # Batch preconditioned Hessian eigenvector
                 with torch.enable_grad():
@@ -282,8 +301,21 @@ class ProjectionTracker:
         self._proj_g_full.append(dot(theta_t, self._pending_g_full).item())
         self._proj_g.append(dot(theta_t, self._pending_g_t).item())
         self._proj_h.append(dot(theta_t, h_t).item())
+
+        # Fixed full-Hessian eigenvector projection (NaN if fixed_u=False)
+        if self._fixed_u_vec is not None:
+            self._proj_w_fixed.append(dot(theta_t, self._fixed_u_vec).item())
+        else:
+            self._proj_w_fixed.append(float('nan'))
+
         self._proj_w.append(dot(theta_t, self._pending_w_t).item())
         self._proj_wb.append(dot(theta_t, self._pending_wb_t).item())
+
+        # Fixed preconditioned eigenvector projection (NaN if fixed_u=False or no preconditioner)
+        if self._fixed_u_precond_vec is not None:
+            self._proj_w_precond_fixed.append(dot(theta_t, self._fixed_u_precond_vec).item())
+        else:
+            self._proj_w_precond_fixed.append(float('nan'))
 
         if self._pending_w_precond is not None:
             self._proj_w_precond.append(dot(theta_t, self._pending_w_precond).item())
@@ -316,15 +348,20 @@ class ProjectionTracker:
             print("ProjectionTracker: no data recorded, skipping save.")
             return
 
+        n = len(self._steps)
+        nan_arr = lambda: np.full(n, np.nan, dtype=np.float32)
+
         out_path = self.save_dir / 'projections.npz'
         np.savez(
             out_path,
             steps=np.array(self._steps, dtype=np.int64),
-            proj_g_full=np.array(self._proj_g_full,    dtype=np.float32),
-            proj_g=np.array(self._proj_g,              dtype=np.float32),
-            proj_h=np.array(self._proj_h,              dtype=np.float32),
-            proj_w=np.array(self._proj_w,              dtype=np.float32),
-            proj_wb=np.array(self._proj_wb,            dtype=np.float32),
+            proj_g_full=np.array(self._proj_g_full,         dtype=np.float32),
+            proj_g=np.array(self._proj_g,                   dtype=np.float32),
+            proj_h=np.array(self._proj_h,                   dtype=np.float32),
+            proj_w_fixed=np.array(self._proj_w_fixed,       dtype=np.float32) if self._proj_w_fixed else nan_arr(),
+            proj_w=np.array(self._proj_w,                   dtype=np.float32),
+            proj_wb=np.array(self._proj_wb,                 dtype=np.float32),
+            proj_w_precond_fixed=np.array(self._proj_w_precond_fixed, dtype=np.float32) if self._proj_w_precond_fixed else nan_arr(),
             proj_w_precond=np.array(self._proj_w_precond,   dtype=np.float32),
             proj_wb_precond=np.array(self._proj_wb_precond, dtype=np.float32),
             lambda_precond=np.array(self._lambda_precond,   dtype=np.float32),

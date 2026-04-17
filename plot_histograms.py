@@ -1,14 +1,11 @@
 """
 plot_histograms.py — Combined training curve + projection histograms.
 
-Layout (multi-row):
-  Non-preconditioned optimizers (5 projections), 2 rows × 3 cols:
-    [training curve] [proj_g_full] [proj_g]
-    [proj_h]         [proj_w]      [proj_wb]
-
-  Preconditioned optimizers (7 projections), 2 rows × 4 cols:
-    [training curve] [proj_g_full] [proj_g]   [proj_h]
-    [proj_w]         [proj_wb]     [proj_w_p] [proj_wb_p]
+Layout (multi-row), training curve always in cell 0:
+  5 proj  (no fixed_u, no precond):  2×3
+  6 proj  (fixed_u, no precond):     2×4  (1 unused)
+  7 proj  (no fixed_u, precond):     2×4
+  9 proj  (fixed_u, precond):        3×4  (training + 9 hist, last 2 unused)
 
 Usage:
     python plot_histograms.py /path/to/run_folder
@@ -28,15 +25,17 @@ import matplotlib.pyplot as plt
 
 
 PROJECTIONS_BASE = [
-    ('proj_g_full', r'$\langle\theta_t,\, \mathbb{E}[g_t]\rangle$', 'Full-batch gradient'),
-    ('proj_g',      r'$\langle\theta_t,\, g_t\rangle$',             'Mini-batch gradient'),
-    ('proj_h',      r'$\langle\theta_t,\, h_t\rangle$',             r'Step $\Delta\theta$'),
-    ('proj_w',      r'$\langle\theta_t,\, w_t\rangle$',             'Full Hessian eigvec'),
-    ('proj_wb',     r'$\langle\theta_t,\, w^b_t\rangle$',           'Batch Hessian eigvec'),
+    ('proj_g_full',  r'$\langle\theta_t,\, \mathbb{E}[g_t]\rangle$', 'Full-batch gradient'),
+    ('proj_g',       r'$\langle\theta_t,\, g_t\rangle$',              'Mini-batch gradient'),
+    ('proj_h',       r'$\langle\theta_t,\, h_t\rangle$',              r'Step $\Delta\theta$'),
+    ('proj_w_fixed', r'$\langle\theta_t,\, u_{\mathrm{from}}\rangle$', 'Fixed full Hessian eigvec'),
+    ('proj_w',       r'$\langle\theta_t,\, w_t\rangle$',              'Full Hessian eigvec'),
+    ('proj_wb',      r'$\langle\theta_t,\, w^b_t\rangle$',            'Batch Hessian eigvec'),
 ]
 PROJECTIONS_PRECOND = [
-    ('proj_w_precond',  r'$\langle\theta_t,\, \tilde{w}_t\rangle$',   r'Precond. full eigvec'),
-    ('proj_wb_precond', r'$\langle\theta_t,\, \tilde{w}^b_t\rangle$', r'Precond. batch eigvec'),
+    ('proj_w_precond_fixed', r'$\langle\theta_t,\, \tilde{u}_{\mathrm{from}}\rangle$', r'Fixed precond. full eigvec'),
+    ('proj_w_precond',       r'$\langle\theta_t,\, \tilde{w}_t\rangle$',               r'Precond. full eigvec'),
+    ('proj_wb_precond',      r'$\langle\theta_t,\, \tilde{w}^b_t\rangle$',             r'Precond. batch eigvec'),
 ]
 
 
@@ -156,20 +155,20 @@ def main():
     track_until = int(data['track_until'])
     n_steps    = len(steps)
 
-    # Determine if we have preconditioned projections
+    # Determine which projections to show (all-NaN slots are hidden by plot_histogram)
     has_precond = (
-        'proj_w_precond' in data and
-        not _all_nan(data['proj_w_precond'])
+        'proj_w_precond' in data and not _all_nan(data['proj_w_precond'])
     )
-
     projections = PROJECTIONS_BASE + (PROJECTIONS_PRECOND if has_precond else [])
 
-    # Layout
+    # Layout: choose grid based on total cells needed (1 training + n_hist histograms)
     n_hist = len(projections)
     if n_hist <= 5:
-        nrows, ncols = 2, 3    # 1 training + 5 hist → 2×3 (last cell empty)
+        nrows, ncols = 2, 3    # 1 + 5 → 2×3 (last cell unused)
+    elif n_hist <= 7:
+        nrows, ncols = 2, 4    # 1 + 6 or 7 → 2×4
     else:
-        nrows, ncols = 2, 4    # 1 training + 7 hist → 2×4
+        nrows, ncols = 3, 4    # 1 + 8 or 9 → 3×4 (last 2 unused)
 
     fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 5, nrows * 4))
     axes_flat = axes.flatten()

@@ -385,6 +385,7 @@ def train(
             compute_quantities_with_uB: bool = True,
             track_from: int | None = None,
             track_until: int | None = None,
+            fixed_u: bool = False,
             ):
 
     # -------------------------------------
@@ -510,8 +511,10 @@ def train(
             save_dir=save_to,
             device=device,
             optimizer_wrapper=optimizer,
+            fixed_u=fixed_u,
         )
-        print(f"Projection tracking enabled for steps {track_from}–{track_until}")
+        print(f"Projection tracking enabled for steps {track_from}–{track_until}"
+              + (" [fixed_u]" if fixed_u else ""))
 
     # -------------------------------------
     # Section: Training Step
