@@ -118,6 +118,8 @@ class ProjectionTracker:
                     cap = 512
                 elif isinstance(self.net, (WideResNet, WideResNetNoBN)):
                     cap = 1024
+                elif self.net.__class__.__name__ == 'ViT':
+                    cap = 2048
         return cap
 
     def _get_subset(self):

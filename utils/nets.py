@@ -1,6 +1,9 @@
+import math
+
 import torch as T
 import torch
 import torch.nn as nn
+import timm
 
 from .resnet_new import resnet14, resnet20, ResNet
 from .resnet_bn_new import resnet14 as resnet14_bn, resnet20 as resnet20_bn, ResNet as ResNetBN
@@ -159,6 +162,19 @@ def get_model_presets():
                 'width_factor': 2,
             },
         },
+        'vit': {
+            'type': 'vit',
+            'params': {
+                'img_size': 32,
+                'patch_size': 4,
+                'embed_dim': 64,
+                'depth': 2,
+                'num_heads': 2,
+                'mlp_ratio': 4.0,
+                'use_layer_norm': True,
+                'residual_scaling': True,
+            },
+        },
     }
     return model_presets
 
@@ -277,6 +293,33 @@ class CNN(nn.Module):
         return x
 
 
+class ViT(nn.Module):
+    def __init__(self, img_size=32, patch_size=4, embed_dim=192, depth=6,
+                 num_heads=3, mlp_ratio=4.0, num_classes=10, use_layer_norm=False,
+                 residual_scaling=False):
+        super().__init__()
+        # Disable flash/mem-efficient SDP so second-order gradients work.
+        T.backends.cuda.enable_flash_sdp(False)
+        T.backends.cuda.enable_mem_efficient_sdp(False)
+        self.residual_scaling = residual_scaling
+        norm_layer = nn.LayerNorm if use_layer_norm else nn.Identity
+        self.model = timm.create_model(
+            'vit_tiny_patch16_224',
+            pretrained=False,
+            norm_layer=norm_layer,
+            img_size=img_size,
+            patch_size=patch_size,
+            embed_dim=embed_dim,
+            depth=depth,
+            num_heads=num_heads,
+            mlp_ratio=mlp_ratio,
+            num_classes=num_classes,
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
 class Linear(nn.Module):
     def __init__(self, input_dim, hidden_dim, n_layers, output_dim, bias=True):
         super(Linear, self).__init__()
@@ -334,6 +377,19 @@ def prepare_net(model_type: str,
             depth=params['depth'],
             widen_factor=params['width_factor'],
             num_classes=params['output_dim'],
+        )
+
+    if model_type == 'vit':
+        net = ViT(
+            img_size=params.get('img_size', 32),
+            patch_size=params.get('patch_size', 4),
+            embed_dim=params.get('embed_dim', 192),
+            depth=params.get('depth', 6),
+            num_heads=params.get('num_heads', 3),
+            mlp_ratio=params.get('mlp_ratio', 4.0),
+            num_classes=params['output_dim'],
+            use_layer_norm=params.get('use_layer_norm', False),
+            residual_scaling=params.get('residual_scaling', False),
         )
 
     return net
@@ -479,6 +535,27 @@ def initialize_wrn(net: WideResNet, scale=None):
         nn.init.zeros_(net.fc.bias)
 
 
+def initialize_vit(net, scale=None, residual_scaling=False):
+    if scale is None:
+        scale = 1.0
+    std_base = 0.02 * scale
+    std_residual = (std_base / math.sqrt(2 * len(net.model.blocks))
+                    if residual_scaling else std_base)
+    for m in net.model.modules():
+        if isinstance(m, (nn.Linear, nn.Conv2d)):
+            nn.init.normal_(m.weight, std=std_base)
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+    if residual_scaling:
+        for block in net.model.blocks:
+            nn.init.normal_(block.attn.proj.weight, std=std_residual)
+            nn.init.normal_(block.mlp.fc2.weight, std=std_residual)
+    if getattr(net.model, 'pos_embed', None) is not None:
+        nn.init.normal_(net.model.pos_embed, std=std_base)
+    if getattr(net.model, 'cls_token', None) is not None:
+        nn.init.normal_(net.model.cls_token, std=std_base)
+
+
 def initialize_linear(net, scale=None):
     if scale is None:
         scale=1
@@ -529,6 +606,8 @@ def initialize_net(net, scale=None, seed=None):
             initialize_wrn(net, scale=scale)
         elif isinstance(net, WideResNetNoBN):
             initialize_wrn_fixup(net)
+        elif isinstance(net, ViT):
+            initialize_vit(net, scale=scale, residual_scaling=net.residual_scaling)
         else:
             raise ValueError("Unknown net type")
 

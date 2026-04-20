@@ -54,6 +54,7 @@ class MeasurementRunner:
         compute_distributions,
         distributions_file,
         compute_quantities_with_uB=True,
+        measurement_batch_size_cap=None,
     ):
         self.net = net
         self.optimizer = optimizer
@@ -70,6 +71,7 @@ class MeasurementRunner:
         self.compute_distributions = compute_distributions
         self.distributions_file = distributions_file
         self.compute_quantities_with_uB = compute_quantities_with_uB
+        self.measurement_batch_size_cap = measurement_batch_size_cap
         self._dist_records = []
 
         self.eigenvalues_log = []
@@ -79,6 +81,35 @@ class MeasurementRunner:
             self.eigenvalues_file.write('[\n')
         else:
             self.eigenvalues_file = None
+
+    def _has_small_gpu(self):
+        return (
+            str(self.device).startswith('cuda')
+            and torch.cuda.get_device_properties(0).total_memory < 20 * 1024**3
+        )
+
+    def _is_vit(self):
+        return self.net.__class__.__name__ == 'ViT'
+
+    def _measurement_batch_size(self):
+        if self.measurement_batch_size_cap is not None:
+            return min(self.batch_size, int(self.measurement_batch_size_cap))
+        if self._is_vit() and self._has_small_gpu():
+            return min(self.batch_size, 128)
+        return self.batch_size
+
+    def _full_subset_cap(self):
+        lmax_max_size = 4096
+        if self._has_small_gpu():
+            if isinstance(self.net, CNN):
+                lmax_max_size = 2560
+            if isinstance(self.net, ResNet):
+                lmax_max_size = 512
+            if isinstance(self.net, WideResNet) or isinstance(self.net, WideResNetNoBN):
+                lmax_max_size = 1024
+            if self._is_vit():
+                lmax_max_size = 1024
+        return lmax_max_size
 
     def close(self):
         if self._dist_records:
@@ -143,7 +174,7 @@ class MeasurementRunner:
                     self.X,
                     self.Y,
                     self.loss_fn,
-                    batch_size=self.batch_size,
+                    batch_size=self._measurement_batch_size(),
                     n_estimates=self.probe_samples,
                     min_estimates=20,
                     eps=0.005,
@@ -168,16 +199,7 @@ class MeasurementRunner:
                 torch.cuda.empty_cache()
             optimizer.zero_grad()
 
-            lmax_max_size = 4096
-            if str(self.device).startswith('cuda'):
-                total_memory = torch.cuda.get_device_properties(0).total_memory
-                if total_memory < 20 * 1024**3:
-                    if isinstance(self.net, CNN):
-                        lmax_max_size = 2048 + 512
-                    if isinstance(self.net, ResNet):
-                        lmax_max_size = 512
-                    if isinstance(self.net, WideResNet) or isinstance(self.net, WideResNetNoBN):
-                        lmax_max_size = 1024
+            lmax_max_size = self._full_subset_cap()
 
             if len(self.X) > lmax_max_size:
                 idx = gimme_random_subset_idx(len(self.X), lmax_max_size)
@@ -263,16 +285,7 @@ class MeasurementRunner:
                              frequency_calculator.should_measure('distributions', ctx))
 
                 # Compute full-batch gradient every probe step (same subset cap as lmax)
-                lmax_max_size = 4096
-                if str(self.device).startswith('cuda'):
-                    total_memory = torch.cuda.get_device_properties(0).total_memory
-                    if total_memory < 20 * 1024**3:
-                        if isinstance(self.net, CNN):
-                            lmax_max_size = 2048 + 512
-                        if isinstance(self.net, ResNet):
-                            lmax_max_size = 512
-                        if isinstance(self.net, WideResNet) or isinstance(self.net, WideResNetNoBN):
-                            lmax_max_size = 1024
+                lmax_max_size = self._full_subset_cap()
                 if len(self.X) > lmax_max_size:
                     idx = gimme_random_subset_idx(len(self.X), lmax_max_size)
                     X_gf = self.X[idx]
@@ -288,7 +301,7 @@ class MeasurementRunner:
 
                 scalars, distributions = compute_gbs_probe_batches(
                     self.net, self.X, self.Y, self.loss_fn, self.optimizer,
-                    batch_size=self.batch_size,
+                    batch_size=self._measurement_batch_size(),
                     n_probe=self.probe_samples,
                     power_iters=self.power_iters,
                     u_full=u_full,
@@ -386,6 +399,7 @@ def train(
             track_from: int | None = None,
             track_until: int | None = None,
             fixed_u: bool = False,
+            measurement_batch_size_cap: int | None = None,
             ):
 
     # -------------------------------------
@@ -496,6 +510,7 @@ def train(
         compute_distributions=compute_distributions,
         distributions_file=distributions_file,
         compute_quantities_with_uB=compute_quantities_with_uB,
+        measurement_batch_size_cap=measurement_batch_size_cap,
     )
 
     # ----- Projection Tracker -----

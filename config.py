@@ -86,6 +86,7 @@ full_loss_warmup   = False     # full-batch loss every step for first ~128 steps
 cache_eigenvectors  = True     # warm-start eigenvector cache for faster eigenvalue computation
 use_power_iteration = False    # True = power iteration; False = LOBPCG
 num_eigenvalues     = 1        # number of top eigenvalues to compute (1 = just lambda_max)
+measurement_batch_size_cap = None  # cap second-order measurement batches; None = automatic
 
 # --- Projection histogram tracking ---
 # Set both to enable tracking of <theta_t, v> projections at the edge of stability.
@@ -112,6 +113,7 @@ import ast as _ast
 
 _args = sys.argv[1:]
 _i = 0
+_overridden_keys = set()
 while _i < len(_args):
     if _args[_i].startswith('--'):
         _key = _args[_i][2:]
@@ -123,9 +125,16 @@ while _i < len(_args):
         if _key not in globals():
             raise ValueError(f"Unknown config key: {_key}")
         globals()[_key] = _val
+        _overridden_keys.add(_key)
         _i += 2
     else:
         _i += 1
+
+if model == 'vit':
+    if 'no_init' not in _overridden_keys:
+        no_init = True
+    if 'measurement_batch_size_cap' not in _overridden_keys:
+        measurement_batch_size_cap = 128
 
 
 # =============================================
@@ -233,4 +242,5 @@ if __name__ == '__main__':
         track_from=track_from,
         track_until=track_until,
         fixed_u=fixed_u,
+        measurement_batch_size_cap=measurement_batch_size_cap,
     )
