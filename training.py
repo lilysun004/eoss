@@ -73,6 +73,10 @@ class MeasurementRunner:
         self.compute_quantities_with_uB = compute_quantities_with_uB
         self.measurement_batch_size_cap = measurement_batch_size_cap
         self._dist_records = []
+        # Cached subset for lmax power iteration. Drawn once on first firing and
+        # reused so warm-started power iteration stays effective across firings.
+        self._lmax_subset_X: torch.Tensor | None = None
+        self._lmax_subset_Y: torch.Tensor | None = None
 
         self.eigenvalues_log = []
         if 'lmax' in measurements and num_eigenvalues > 1:
@@ -201,13 +205,16 @@ class MeasurementRunner:
 
             lmax_max_size = self._full_subset_cap()
 
-            if len(self.X) > lmax_max_size:
-                idx = gimme_random_subset_idx(len(self.X), lmax_max_size)
-                X_subset = self.X[idx]
-                Y_subset = self.Y[idx]
-            else:
-                X_subset = self.X
-                Y_subset = self.Y
+            if self._lmax_subset_X is None:
+                if len(self.X) > lmax_max_size:
+                    idx = gimme_random_subset_idx(len(self.X), lmax_max_size)
+                    self._lmax_subset_X = self.X[idx]
+                    self._lmax_subset_Y = self.Y[idx]
+                else:
+                    self._lmax_subset_X = self.X
+                    self._lmax_subset_Y = self.Y
+            X_subset = self._lmax_subset_X
+            Y_subset = self._lmax_subset_Y
 
             preds = self.net(X_subset).squeeze(dim=-1)
             loss = self.loss_fn(preds, Y_subset)

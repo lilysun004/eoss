@@ -163,13 +163,15 @@ if __name__ == '__main__':
         raise ValueError("Set either epochs or steps, not both")
 
     # ----- Measurement frequencies -----
-    freq_div = 2 if more_freq_measure else 1
-    frequency_calculator.set_interval('full_batch_lambda_max', compute_probe_batch_every // freq_div)
-    frequency_calculator.set_interval('batch_sharpness',       batch_sharpness_every // freq_div)
-    frequency_calculator.set_interval('probe_batch_gbs',       compute_probe_batch_every // freq_div)
-    frequency_calculator.set_interval('distributions',         compute_probe_batch_every // freq_div)
-    frequency_calculator.set_interval('step_sharpness',        step_sharpness_every // freq_div)
-    frequency_calculator.set_interval('full_loss',             full_loss_every // freq_div)
+    # more_freq_measure=True now halves intervals *only* inside the tracking
+    # window [track_from, track_until]. Outside the window, base intervals apply.
+    frequency_calculator.set_interval('full_batch_lambda_max', compute_probe_batch_every)
+    frequency_calculator.set_interval('batch_sharpness',       batch_sharpness_every)
+    frequency_calculator.set_interval('probe_batch_gbs',       compute_probe_batch_every)
+    frequency_calculator.set_interval('distributions',         compute_probe_batch_every)
+    frequency_calculator.set_interval('step_sharpness',        step_sharpness_every)
+    frequency_calculator.set_interval('full_loss',             full_loss_every)
+    frequency_calculator.set_window_halve(track_from, track_until, enabled=more_freq_measure)
 
     # ----- Measurements -----
     measurements = {'lmax'} | {name for name, enabled in [

@@ -71,6 +71,12 @@ class ProjectionTracker:
         self._eigvec_cache_precond_full  = EigenvectorCache(max_eigenvectors=1)
         self._eigvec_cache_precond_batch = EigenvectorCache(max_eigenvectors=1)
 
+        # Fixed full-Hessian subset (drawn once, then reused across tracked steps so
+        # warm-started power iteration actually benefits from step-to-step Hessian
+        # similarity — otherwise a fresh random subset each step defeats warm-start).
+        self._fixed_subset_X: torch.Tensor | None = None
+        self._fixed_subset_Y: torch.Tensor | None = None
+
         # Storage (ordering: g_full, g, h, w_fixed, w, wb, w_precond_fixed, w_precond, wb_precond)
         self._steps:               list[int]   = []
         self._proj_g_full:         list[float] = []
@@ -123,12 +129,17 @@ class ProjectionTracker:
         return cap
 
     def _get_subset(self):
-        cap = self._get_subset_cap()
-        N = len(self.X)
-        if N > cap:
-            idx = gimme_random_subset_idx(N, cap)
-            return self.X[idx], self.Y[idx]
-        return self.X, self.Y
+        if self._fixed_subset_X is None:
+            cap = self._get_subset_cap()
+            N = len(self.X)
+            if N > cap:
+                idx = gimme_random_subset_idx(N, cap)
+                self._fixed_subset_X = self.X[idx]
+                self._fixed_subset_Y = self.Y[idx]
+            else:
+                self._fixed_subset_X = self.X
+                self._fixed_subset_Y = self.Y
+        return self._fixed_subset_X, self._fixed_subset_Y
 
     # ------------------------------------------------------------------ #
     #  Standard power iteration (for Hessian eigenvectors)                #

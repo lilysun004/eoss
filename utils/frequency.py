@@ -32,6 +32,10 @@ class FrequencyCalculator:
     def __init__(self):
         self.rules: Dict[str, Callable[[MeasurementContext], bool]] = {}
         self._intervals: Dict[str, Optional[int]] = {}
+        # When set, intervals are halved for steps in [track_from, track_until].
+        self._window_halve: bool = False
+        self._window_from: Optional[int] = None
+        self._window_until: Optional[int] = None
         self._setup_default_rules()
 
     def set_interval(self, measurement_type: str, every_n_steps: Optional[int]):
@@ -40,12 +44,22 @@ class FrequencyCalculator:
         """
         self._intervals[measurement_type] = every_n_steps
 
+    def set_window_halve(self, track_from: Optional[int], track_until: Optional[int], enabled: bool):
+        """Halve every fixed interval for steps in [track_from, track_until] when enabled."""
+        self._window_halve = bool(enabled) and track_from is not None and track_until is not None
+        self._window_from = track_from
+        self._window_until = track_until
+
     def should_measure(self, measurement_type: str, ctx: MeasurementContext) -> bool:
         """Check if a measurement should be performed at this step."""
         # Fixed interval takes priority
         interval = self._intervals.get(measurement_type)
         if interval is not None:
-            return ctx.step_number % interval == 0
+            effective = interval
+            if (self._window_halve
+                and self._window_from <= ctx.step_number <= self._window_until):
+                effective = max(1, interval // 2)
+            return ctx.step_number % effective == 0
 
         # Fall back to adaptive rule
         if measurement_type not in self.rules:

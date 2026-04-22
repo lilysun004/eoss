@@ -847,7 +847,7 @@ def _power_iteration_top_eigenvector(hvp, n_params, device, num_iters):
     return v
 
 
-def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size, n_probe=128, power_iters=50, u_full=None, lambda_max=None, return_distributions=False, grad_full=None, compute_uB=True):
+def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size, n_probe=128, power_iters=50, u_full=None, lambda_max=None, return_distributions=False, grad_full=None, compute_uB=True, min_estimates=20, eps=0.005):
     """Compute GBS quantities over probe batches.
 
     For each probe batch (H, g, s all from that batch unless noted):
@@ -892,7 +892,7 @@ def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size,
         dist_s_dot_u, dist_g_dot_u = [], []
         dist_s_dot_ufull, dist_s_dot_gfull, dist_g_dot_gfull = [], [], []
 
-    for random_idx in all_batch_indices:
+    for _probe_i, random_idx in enumerate(all_batch_indices):
         if batch_size > 128:
             torch.cuda.empty_cache()
 
@@ -1022,6 +1022,18 @@ def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size,
 
         A_ufull_vals.append(A_ufull_val)
         B_ufull_vals.append(B_ufull_val)
+
+        # Early-exit: stop once the relative standard error of the GBS estimator
+        # (mean of per-probe ratios B_i / -A_i) falls below eps. Matches the
+        # pattern in calculate_averaged_grad_H_grad_step.
+        if _probe_i + 1 >= min_estimates:
+            gbs_r = np.array(B_vals) / np.array([-a if a != 0 else np.nan for a in A_vals])
+            gbs_r = gbs_r[np.isfinite(gbs_r)]
+            if len(gbs_r) >= min_estimates:
+                m = gbs_r.mean()
+                sem = gbs_r.std(ddof=1) / np.sqrt(len(gbs_r))
+                if abs(m) > 1e-12 and sem / abs(m) < eps:
+                    break
 
     SBS       = float(np.nanmean(np.array(SBS_vals)))
     GBS       = float(np.mean(np.array(B_vals)       / np.array([-a for a in A_vals])))
