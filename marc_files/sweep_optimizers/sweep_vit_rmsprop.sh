@@ -5,7 +5,7 @@
 #SBATCH -c 16
 #SBATCH --gres=gpu:1
 #SBATCH --mem=96G
-#SBATCH -t 16:00:00
+#SBATCH -t 24:00:00
 #SBATCH --array=0-4
 #SBATCH -o /n/home06/mwalden/eoss/marc_files/logs/vit_rms_%a_%j.out
 #SBATCH -e /n/home06/mwalden/eoss/marc_files/logs/vit_rms_%a_%j.err
@@ -31,9 +31,9 @@ echo "Array task $SLURM_ARRAY_TASK_ID → batch size $BATCH"
     --lr 0.00002 \
     --optimizer_params "{'beta2': 0.99}" \
     --batch_size $BATCH \
-    --steps 50000 \
-    --track_from 40000 \
-    --track_until 50000 \
+    --steps 150000 \
+    --track_from 145000 \
+    --track_until 150000 \
     --more_freq_measure True \
     --fixed_u True \
     --results_subfolder marc_vit_sweep

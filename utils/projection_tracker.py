@@ -145,8 +145,12 @@ class ProjectionTracker:
     #  Standard power iteration (for Hessian eigenvectors)                #
     # ------------------------------------------------------------------ #
 
-    def _power_iteration(self, loss, cache, max_iters=50, reltol=0.005):
-        """Return (eigenvalue, eigenvector) for the top eigenvector of H."""
+    def _power_iteration(self, loss, cache, max_iters=30, reltol=0.005, grads=None):
+        """Return (eigenvalue, eigenvector) for the top eigenvector of H.
+
+        When `grads` is provided, reuses them for the HVP machinery instead of
+        re-running autograd.grad on the same loss (saves one backward pass).
+        """
         _, w = compute_eigenvalues(
             loss, self.net,
             k=1,
@@ -155,6 +159,7 @@ class ProjectionTracker:
             eigenvector_cache=cache,
             return_eigenvectors=True,
             use_power_iteration=True,
+            grads=grads,
         )
         # Retrieve the eigenvalue stored in cache by the power iteration
         lam = cache.eigenvalues[0] if cache.eigenvalues else float('nan')
@@ -167,7 +172,7 @@ class ProjectionTracker:
     # ------------------------------------------------------------------ #
 
     def _precond_power_iteration(self, loss, cache, D_inv_sqrt,
-                                  max_iters=50, reltol=0.005):
+                                  max_iters=30, reltol=0.005):
         """Return (eigenvalue, eigenvector) for the top eigenvector of D^{-1/2} H D^{-1/2}.
 
         Matvec: v → D^{-1/2} H (D^{-1/2} v)
@@ -224,30 +229,19 @@ class ProjectionTracker:
         theta_t = param_vector(self.net).detach().clone()
         g_t = grads_vector(self.net).detach().clone()
 
-        # Save original .grad so optimizer.step() is unaffected
-        saved_grads = [
-            p.grad.detach().clone() if p.grad is not None else None
-            for p in self.net.parameters()
-        ]
-
-        # 2. Full-batch gradient (random subset)
+        # 2+3. Single forward pass on the fixed subset: compute g_full_t AND reuse the
+        #      same graph + grads for w_t's power iteration (saves one forward + one
+        #      autograd.grad call per tracked step). Using torch.autograd.grad avoids
+        #      touching .grad, so optimizer.step()'s mini-batch gradient is preserved.
         X_sub, Y_sub = self._get_subset()
-        self.net.zero_grad()
         with torch.enable_grad():
             preds_sub = self.net(X_sub).squeeze(dim=-1)
             loss_sub = self.loss_fn(preds_sub, Y_sub)
-            loss_sub.backward()
-        g_full_t = grads_vector(self.net).detach().clone()
+            params_list = list(self.net.parameters())
+            grads_sub = torch.autograd.grad(loss_sub, params_list, create_graph=True)
+        g_full_t = torch.cat([g.detach().flatten() for g in grads_sub])
 
-        # Restore mini-batch grads
-        for p, g in zip(self.net.parameters(), saved_grads):
-            p.grad = g
-
-        # 3. w_t — top eigenvector of full Hessian (new graph)
-        with torch.enable_grad():
-            preds_sub2 = self.net(X_sub).squeeze(dim=-1)
-            loss_sub2 = self.loss_fn(preds_sub2, Y_sub)
-        _, w_t = self._power_iteration(loss_sub2, self._eigvec_cache_full)
+        _, w_t = self._power_iteration(loss_sub, self._eigvec_cache_full, grads=grads_sub)
 
         # Capture fixed full-Hessian eigenvector at the first tracked step
         if self._fixed_u and self._fixed_u_vec is None:

@@ -317,6 +317,7 @@ def compute_eigenvalues(loss,
                         return_eigenvectors: bool = False,
                         use_power_iteration: bool = False,
                         use_lanczos: bool = False,
+                        grads=None,
                         ):
     """
     Computes the top-k eigenvalues of the Hessian of the loss function at the current point.
@@ -338,7 +339,7 @@ def compute_eigenvalues(loss,
     if use_power_iteration and k == 1:
         return compute_lambdamax_power_iteration(
             loss, net, max_iterations, reltol, init_vectors,
-            eigenvector_cache, return_eigenvectors
+            eigenvector_cache, return_eigenvectors, grads=grads,
         )
 
     if use_lanczos:
@@ -503,13 +504,19 @@ def compute_multiple_eigenvalues_lobpcg(loss, net, k=5, max_iterations=100, relt
 
 
 def compute_lambdamax_power_iteration(loss, net, max_iterations, reltol, init_vector,
-                                       eigenvector_cache, return_eigenvector):
-    """Power iteration implementation of the maximum eigenvalue of the Hessian."""
+                                       eigenvector_cache, return_eigenvector, grads=None):
+    """Power iteration implementation of the maximum eigenvalue of the Hessian.
+
+    If `grads` is provided (tuple of per-parameter tensors with create_graph=True),
+    it is reused instead of calling autograd.grad — avoiding a redundant backward
+    pass when the caller already has the gradient in hand.
+    """
     device = next(net.parameters()).device
 
     # compute gradient and keep it for repeated Hessian-vector products
     params = list(net.parameters())
-    grads = torch.autograd.grad(loss, params, create_graph=True)
+    if grads is None:
+        grads = torch.autograd.grad(loss, params, create_graph=True)
     hessian_vector_product = create_hessian_vector_product(
         loss,
         net,
