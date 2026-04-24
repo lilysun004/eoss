@@ -119,8 +119,15 @@ class MeasurementRunner:
         if self._dist_records:
             keys = [k for k in self._dist_records[0] if k != 'step']
             payload = {'steps': np.array([r['step'] for r in self._dist_records])}
+            # Per-record arrays may have ragged lengths because the probe loop
+            # has an RSE early-exit. Pad with NaN to the max length.
             for k in keys:
-                payload[k] = np.stack([r[k] for r in self._dist_records])
+                arrs = [np.asarray(r[k], dtype=np.float64) for r in self._dist_records]
+                max_len = max(a.shape[0] for a in arrs)
+                padded = np.full((len(arrs), max_len), np.nan, dtype=np.float64)
+                for i, a in enumerate(arrs):
+                    padded[i, :a.shape[0]] = a
+                payload[k] = padded
             np.savez(self.distributions_file, **payload)
         if self.eigenvalues_file is not None:
             self.eigenvalues_file.write('\n]')
