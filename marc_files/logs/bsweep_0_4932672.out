@@ -1,4 +1,0 @@
-Array task 0 → batch size 2
-Training started at 2026-04-11 02:59:26
-Logging: lambda_max (every 256), batch_sharpness (every 256), probe_batch_gbs (every 256)
-Projection tracking enabled for steps 20000–30000

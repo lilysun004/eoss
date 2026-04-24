@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=96G
 #SBATCH -t 24:00:00
-#SBATCH --array=0-4
+#SBATCH --array=0-3
 #SBATCH -o /n/home06/mwalden/eoss/marc_files/logs/vit_rms_%a_%j.out
 #SBATCH -e /n/home06/mwalden/eoss/marc_files/logs/vit_rms_%a_%j.err
 

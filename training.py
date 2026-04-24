@@ -406,6 +406,10 @@ def train(
             track_from: int | None = None,
             track_until: int | None = None,
             fixed_u: bool = False,
+            projection_save_every: int = 100,
+            track_stride: int = 1,
+            lobpcg_max_iters: int = 20,
+            lobpcg_reltol: float = 0.02,
             measurement_batch_size_cap: int | None = None,
             ):
 
@@ -534,9 +538,15 @@ def train(
             device=device,
             optimizer_wrapper=optimizer,
             fixed_u=fixed_u,
+            save_every=projection_save_every,
+            track_stride=track_stride,
+            lobpcg_max_iters=lobpcg_max_iters,
+            lobpcg_reltol=lobpcg_reltol,
         )
         print(f"Projection tracking enabled for steps {track_from}–{track_until}"
-              + (" [fixed_u]" if fixed_u else ""))
+              + (" [fixed_u]" if fixed_u else "")
+              + f" [stride={track_stride} save_every={projection_save_every}"
+              + f" lobpcg_max_iters={lobpcg_max_iters} lobpcg_reltol={lobpcg_reltol}]")
 
     # -------------------------------------
     # Section: Training Step
@@ -678,6 +688,12 @@ def train(
             results_file.write(msg + "\n")
 
             pbar.update(1)
+
+            if step_number > 0 and step_number % 1000 == 0:
+                elapsed = time.time() - start_time
+                print(f"[step {step_number}/{max_steps}] elapsed "
+                      f"{time.strftime('%H:%M:%S', time.gmtime(elapsed))}",
+                      flush=True)
 
 
         # --- Epoch Finalization ---

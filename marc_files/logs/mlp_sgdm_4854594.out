@@ -1,6 +1,0 @@
-Training started at 2026-04-10 20:43:32
-Logging: lambda_max (every 256), batch_sharpness (every 256), probe_batch_gbs (every 256)
-Projection tracking enabled for steps 20000–30000
-ProjectionTracker: saved 10001 steps to /n/holylabs/LABS/kdbrantley_lab/Lab/mwalden/results/marc_projection_test/20260410_2043_32_SGD-Momentum_lr0.002_b64_beta-0.9/projections.npz
-Training finished at 2026-04-10 20:59:30
-Total training time: 958.69 seconds

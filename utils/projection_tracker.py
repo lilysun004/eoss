@@ -10,33 +10,44 @@ from .measure import (
     EigenvectorCache,
     HessianVectorProduct,
     create_hessian_vector_product,
+    _run_lobpcg_with_operator,
     param_length,
 )
 from utils.nets import CNN, ResNet, WideResNet, WideResNetNoBN
 
 
+TOP_K = 5
+
+
 class ProjectionTracker:
     """
-    Tracks the projection of the parameter vector theta_t onto dynamically-
-    relevant directions at each training step within a user-specified window.
+    Tracks the projection of the parameter vector theta_t onto the top-5 eigenvectors
+    of various Hessian-like operators at each training step within a user-specified
+    window. Also records top-5 cosine similarity between consecutive tracked steps
+    (alignment of the eigenspace across steps).
 
-    Standard directions (all optimizers):
-      1. E[g_t]     — full-batch gradient (random subset approximation)
-      2. g_t        — current mini-batch gradient
-      3. h_t        — raw parameter change Δθ = θ_{t+1} − θ_t
-      4. u_from     — top eigenvector of full Hessian fixed at track_from (if fixed_u=True)
-      5. w_t        — top eigenvector of the full (subset) Hessian (per-step)
-      6. w_b_t      — top eigenvector of the batch Hessian (per-step)
+    Quantities (all shaped [n_tracked_steps, 5] unless noted):
 
-    Extra directions (Adam / RMSProp only, i.e. when optimizer has a preconditioner):
-      7. ũ_from     — top eigenvec of D^{-1/2}HD^{-1/2} fixed at track_from (if fixed_u=True)
-      8. w_p_t      — top eigenvector of D^{-1/2} H D^{-1/2} (per-step)
-      9. w_pb_t     — top eigenvector of D^{-1/2} H_B D^{-1/2} (per-step)
+    Always computed:
+      - proj_g_full [n]         : ⟨θ_t, E[g_t]⟩ (scalar per step)
+      - proj_g      [n]         : ⟨θ_t, g_t⟩ (scalar per step)
+      - proj_h      [n]         : ⟨θ_t, Δθ⟩ (scalar per step)
+      - proj_w_top5 [n, 5]      : ⟨θ_t, w_k^full(t)⟩ for k=1..5, per-step full-H eigvecs
+      - proj_wb_top5 [n, 5]     : ⟨θ_t, w_k^batch(t)⟩ for k=1..5, per-step batch-H eigvecs
+      - proj_w_fixed_top5 [n, 5]: ⟨θ_t, w_k^fixed⟩, fixed at the first tracked step
+      - cos_sim_full_top5 [n, 5]: |⟨w_k^full(t-1), w_k^full(t)⟩|; first row all NaN
+      - lambda_top5 [n, 5]      : top-5 eigenvalues of full (subset) Hessian
 
-    For (8) and (9), the eigenvalue λ_max(D^{-1/2} H D^{-1/2}) is also recorded.
+    Preconditioned quantities (Adam / RMSProp only; NaN otherwise):
+      - proj_w_precond_top5      [n, 5]
+      - proj_wb_precond_top5     [n, 5]
+      - proj_w_precond_fixed_top5[n, 5]
+      - cos_sim_precond_top5     [n, 5]
+      - lambda_precond_top5      [n, 5]
 
-    fixed_u=True: compute top eigenvectors once at track_from, reuse for all steps.
-    This tests Lily's hypothesis that the instability direction is stable across time.
+    The `fixed_u` constructor flag is retained for CLI backward compatibility but is
+    now a no-op — fixed top-5 eigenvectors are always captured at the first tracked
+    step.
 
     Usage in training loop:
         theta_before = tracker.pre_step(step_number, X_batch, Y_batch, batch_loss)
@@ -45,7 +56,9 @@ class ProjectionTracker:
     """
 
     def __init__(self, net, X, Y, loss_fn, track_from, track_until,
-                 save_dir, device, optimizer_wrapper=None, fixed_u: bool = False):
+                 save_dir, device, optimizer_wrapper=None, fixed_u: bool = False,
+                 save_every: int = 100, track_stride: int = 1,
+                 lobpcg_max_iters: int = 20, lobpcg_reltol: float = 0.02):
         self.net = net
         self.X = X
         self.Y = Y
@@ -59,52 +72,73 @@ class ProjectionTracker:
             optimizer_wrapper is not None and
             callable(getattr(optimizer_wrapper, 'get_preconditioner_inv_sqrt', None))
         )
+        # fixed_u accepted for CLI backward compat but now a no-op (always fixed).
         self._fixed_u = fixed_u
+        # Incremental save cadence: call save() every `save_every` tracked steps so
+        # partial data survives wall-clock kills / preemption. 0 disables.
+        self._save_every = int(save_every)
+        # Stride inside the tracking window — only every Nth step is actually
+        # tracked (saves most of the work since eigenvectors drift slowly).
+        self._track_stride = max(1, int(track_stride))
+        self._lobpcg_max_iters = int(lobpcg_max_iters)
+        self._lobpcg_reltol = float(lobpcg_reltol)
+        # Log once per run when the batch-H path is elided (batch_size >= dataset).
+        self._batch_h_skip_logged = False
 
-        # Fixed eigenvectors captured at track_from (only used when fixed_u=True)
-        self._fixed_u_vec:        torch.Tensor | None = None
-        self._fixed_u_precond_vec: torch.Tensor | None = None
+        # Fixed top-5 eigenvectors captured at first tracked step (always).
+        self._fixed_top5_full:    torch.Tensor | None = None  # [n_params, 5]
+        self._fixed_top5_precond: torch.Tensor | None = None  # [n_params, 5]
 
-        # Warm-start eigenvector caches
-        self._eigvec_cache_full          = EigenvectorCache(max_eigenvectors=1)
-        self._eigvec_cache_batch         = EigenvectorCache(max_eigenvectors=1)
-        self._eigvec_cache_precond_full  = EigenvectorCache(max_eigenvectors=1)
-        self._eigvec_cache_precond_batch = EigenvectorCache(max_eigenvectors=1)
+        # Previous tracked step's top-5 eigenvectors for cosine similarity.
+        self._prev_w_top5_full:    torch.Tensor | None = None
+        self._prev_w_top5_precond: torch.Tensor | None = None
+
+        # Warm-start eigenvector caches (top-5 each).
+        self._eigvec_cache_full          = EigenvectorCache(max_eigenvectors=TOP_K)
+        self._eigvec_cache_batch         = EigenvectorCache(max_eigenvectors=TOP_K)
+        self._eigvec_cache_precond_full  = EigenvectorCache(max_eigenvectors=TOP_K)
+        self._eigvec_cache_precond_batch = EigenvectorCache(max_eigenvectors=TOP_K)
 
         # Fixed full-Hessian subset (drawn once, then reused across tracked steps so
-        # warm-started power iteration actually benefits from step-to-step Hessian
-        # similarity — otherwise a fresh random subset each step defeats warm-start).
+        # warm-started LOBPCG actually benefits from step-to-step Hessian similarity).
         self._fixed_subset_X: torch.Tensor | None = None
         self._fixed_subset_Y: torch.Tensor | None = None
 
-        # Storage (ordering: g_full, g, h, w_fixed, w, wb, w_precond_fixed, w_precond, wb_precond)
-        self._steps:               list[int]   = []
-        self._proj_g_full:         list[float] = []
-        self._proj_g:              list[float] = []
-        self._proj_h:              list[float] = []
-        self._proj_w_fixed:        list[float] = []
-        self._proj_w:              list[float] = []
-        self._proj_wb:             list[float] = []
-        self._proj_w_precond_fixed: list[float] = []
-        self._proj_w_precond:      list[float] = []
-        self._proj_wb_precond:     list[float] = []
-        self._lambda_precond:       list[float] = []
-        self._lambda_precond_batch: list[float] = []
+        # Per-tracked-step storage. Scalar lists for the simple quantities; lists of
+        # length-5 arrays for the top-5 quantities (stacked to 2D on save()).
+        self._steps:                       list[int]       = []
+        self._proj_g_full:                 list[float]     = []
+        self._proj_g:                      list[float]     = []
+        self._proj_h:                      list[float]     = []
+        self._proj_w_top5:                 list[np.ndarray] = []
+        self._proj_wb_top5:                list[np.ndarray] = []
+        self._proj_w_fixed_top5:           list[np.ndarray] = []
+        self._cos_sim_full_top5:           list[np.ndarray] = []
+        self._lambda_top5:                 list[np.ndarray] = []
+        self._proj_w_precond_top5:         list[np.ndarray] = []
+        self._proj_wb_precond_top5:        list[np.ndarray] = []
+        self._proj_w_precond_fixed_top5:   list[np.ndarray] = []
+        self._cos_sim_precond_top5:        list[np.ndarray] = []
+        self._lambda_precond_top5:         list[np.ndarray] = []
 
-        # Temporary per-step state
-        self._pending_step:      int | None          = None
-        self._pending_theta_t:   torch.Tensor | None = None
-        self._pending_g_t:       torch.Tensor | None = None
-        self._pending_g_full:    torch.Tensor | None = None
-        self._pending_w_t:       torch.Tensor | None = None
-        self._pending_wb_t:      torch.Tensor | None = None
-        self._pending_w_precond:   torch.Tensor | None = None
-        self._pending_wb_precond:  torch.Tensor | None = None
-        self._pending_lam_precond: float | None = None
-        self._pending_lam_precond_batch: float | None = None
+        # Temporary per-step state (populated in pre_step, consumed in post_step)
+        self._pending_step:              int | None = None
+        self._pending_theta_t:           torch.Tensor | None = None
+        self._pending_g_t:               torch.Tensor | None = None
+        self._pending_g_full:            torch.Tensor | None = None
+        self._pending_w_top5:            torch.Tensor | None = None  # [n_params, 5]
+        self._pending_wb_top5:           torch.Tensor | None = None
+        self._pending_w_precond_top5:    torch.Tensor | None = None
+        self._pending_wb_precond_top5:   torch.Tensor | None = None
+        self._pending_cos_full:          np.ndarray | None = None
+        self._pending_cos_precond:       np.ndarray | None = None
+        self._pending_lambda_top5:       np.ndarray | None = None
+        self._pending_lambda_precond_top5: np.ndarray | None = None
 
     def should_track(self, step: int) -> bool:
-        return self.track_from <= step <= self.track_until
+        if not (self.track_from <= step <= self.track_until):
+            return False
+        return (step - self.track_from) % self._track_stride == 0
 
     # ------------------------------------------------------------------ #
     #  Subset selection                                                    #
@@ -142,80 +176,73 @@ class ProjectionTracker:
         return self._fixed_subset_X, self._fixed_subset_Y
 
     # ------------------------------------------------------------------ #
-    #  Standard power iteration (for Hessian eigenvectors)                #
+    #  Top-5 eigenvector helpers                                           #
     # ------------------------------------------------------------------ #
 
-    def _power_iteration(self, loss, cache, max_iters=30, reltol=0.005, grads=None):
-        """Return (eigenvalue, eigenvector) for the top eigenvector of H.
-
-        When `grads` is provided, reuses them for the HVP machinery instead of
-        re-running autograd.grad on the same loss (saves one backward pass).
-        """
-        _, w = compute_eigenvalues(
+    def _top5_eigenvectors(self, loss, cache, max_iters=None, reltol=None, grads=None):
+        """Return (eigenvalues [5], eigenvectors [n_params, 5]) for the full Hessian,
+        warm-started from cache. Eigenvalues returned in descending order by LOBPCG."""
+        if max_iters is None:
+            max_iters = self._lobpcg_max_iters
+        if reltol is None:
+            reltol = self._lobpcg_reltol
+        eigvals, eigvecs = compute_eigenvalues(
             loss, self.net,
-            k=1,
+            k=TOP_K,
             max_iterations=max_iters,
             reltol=reltol,
             eigenvector_cache=cache,
             return_eigenvectors=True,
-            use_power_iteration=True,
+            use_power_iteration=False,
             grads=grads,
         )
-        # Retrieve the eigenvalue stored in cache by the power iteration
-        lam = cache.eigenvalues[0] if cache.eigenvalues else float('nan')
-        if torch.is_tensor(lam):
-            lam = lam.item()
-        return lam, w.detach().clone()
+        # Sort descending (LOBPCG returns ascending or descending depending on flavor;
+        # _run_lobpcg_with_operator uses _eigh_ascending which sorts descending).
+        # Be defensive: always enforce descending here.
+        order = torch.argsort(eigvals, descending=True)
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
+        return eigvals.detach(), eigvecs.detach().clone()
 
-    # ------------------------------------------------------------------ #
-    #  Preconditioned power iteration for D^{-1/2} H D^{-1/2}            #
-    # ------------------------------------------------------------------ #
-
-    def _precond_power_iteration(self, loss, cache, D_inv_sqrt,
-                                  max_iters=30, reltol=0.005):
-        """Return (eigenvalue, eigenvector) for the top eigenvector of D^{-1/2} H D^{-1/2}.
-
-        Matvec: v → D^{-1/2} H (D^{-1/2} v)
-        """
+    def _top5_precond_eigenvectors(self, loss, cache, D_inv_sqrt,
+                                   max_iters=None, reltol=None):
+        """Return top-5 eigenvalues/vectors of D^{-1/2} H D^{-1/2} via LOBPCG."""
+        if max_iters is None:
+            max_iters = self._lobpcg_max_iters
+        if reltol is None:
+            reltol = self._lobpcg_reltol
         hvp = create_hessian_vector_product(loss, self.net, retain_graph=True)
-        n = param_length(self.net)
         d = D_inv_sqrt.to(self.device)
 
-        try:
-            # Warm start from cache
-            if cache.eigenvectors:
-                v = cache.eigenvectors[0].to(self.device).detach()
-            else:
-                v = torch.randn(n, device=self.device, dtype=d.dtype)
-
-            with torch.no_grad():
-                v = v / v.norm()
-
-            eigenval = 0.0
-            for _ in range(max_iters):
-                # Preconditioned matvec: D^{-1/2} H D^{-1/2} v
+        def precond_operator(v):
+            # v may be [n_params, k]; HVP accepts a flat vector, so process per-column.
+            if v.ndim == 1:
                 u = d * v
-                Hu = hvp(u).detach()
-                pHv = d * Hu
+                return d * hvp(u).detach()
+            out = torch.empty_like(v)
+            for j in range(v.shape[1]):
+                u_j = d * v[:, j]
+                out[:, j] = d * hvp(u_j).detach()
+            return out
 
-                with torch.no_grad():
-                    rq = torch.dot(pHv, v) / torch.dot(v, v)
-                    eigenval = rq
-
-                    if rq.abs() < 1e-12:
-                        break
-                    residual = pHv - rq * v
-                    if residual.norm() / rq.abs() < reltol:
-                        break
-                    v = pHv / pHv.norm()
-
-            v = v.detach().clone()
-            cache.store_eigenvector(v, eigenval)
-            lam = eigenval.item() if torch.is_tensor(eigenval) else float(eigenval)
-            return lam, v
-
+        try:
+            eigvals, eigvecs = _run_lobpcg_with_operator(
+                precond_operator,
+                self.net,
+                k=TOP_K,
+                max_iterations=max_iters,
+                reltol=reltol,
+                init_vectors=None,
+                eigenvector_cache=cache,
+                return_eigenvectors=True,
+            )
         finally:
             hvp.free_memory()
+
+        order = torch.argsort(eigvals, descending=True)
+        eigvals = eigvals[order]
+        eigvecs = eigvecs[:, order]
+        return eigvals.detach(), eigvecs.detach().clone()
 
     # ------------------------------------------------------------------ #
     #  pre_step / post_step                                                #
@@ -230,9 +257,8 @@ class ProjectionTracker:
         g_t = grads_vector(self.net).detach().clone()
 
         # 2+3. Single forward pass on the fixed subset: compute g_full_t AND reuse the
-        #      same graph + grads for w_t's power iteration (saves one forward + one
-        #      autograd.grad call per tracked step). Using torch.autograd.grad avoids
-        #      touching .grad, so optimizer.step()'s mini-batch gradient is preserved.
+        #      same graph + grads for top-5 LOBPCG (saves one forward + one
+        #      autograd.grad call per tracked step).
         X_sub, Y_sub = self._get_subset()
         with torch.enable_grad():
             preds_sub = self.net(X_sub).squeeze(dim=-1)
@@ -241,56 +267,98 @@ class ProjectionTracker:
             grads_sub = torch.autograd.grad(loss_sub, params_list, create_graph=True)
         g_full_t = torch.cat([g.detach().flatten() for g in grads_sub])
 
-        _, w_t = self._power_iteration(loss_sub, self._eigvec_cache_full, grads=grads_sub)
+        lam_top5, w_top5 = self._top5_eigenvectors(
+            loss_sub, self._eigvec_cache_full, grads=grads_sub,
+        )  # [5], [n_params, 5]
 
-        # Capture fixed full-Hessian eigenvector at the first tracked step
-        if self._fixed_u and self._fixed_u_vec is None:
-            self._fixed_u_vec = w_t.clone()
+        # Capture fixed full-Hessian top-5 at the first tracked step (always).
+        if self._fixed_top5_full is None:
+            self._fixed_top5_full = w_top5.clone()
 
-        # 4. w_b_t — top eigenvector of batch Hessian
-        with torch.enable_grad():
-            preds_b = self.net(X_batch).squeeze(dim=-1)
-            loss_b = self.loss_fn(preds_b, Y_batch)
-        _, w_b_t = self._power_iteration(loss_b, self._eigvec_cache_batch)
+        # Cosine similarity with previous tracked step's top-5 (|·| absorbs ±sign).
+        if self._prev_w_top5_full is None:
+            cos_full = np.full(TOP_K, np.nan, dtype=np.float32)
+        else:
+            cos_full = np.array([
+                abs(torch.dot(self._prev_w_top5_full[:, k], w_top5[:, k])).item()
+                for k in range(TOP_K)
+            ], dtype=np.float32)
+        self._prev_w_top5_full = w_top5.clone()
 
-        # 5. Preconditioned eigenvectors (Adam / RMSProp only)
-        w_precond = None
-        w_b_precond = None
-        lam_precond = float('nan')
-        lam_precond_batch = float('nan')
+        # 4. Top-5 of batch Hessian. When the training batch covers the full
+        # dataset (e.g. full-batch training at b=|X|), batch-H == full-H — reuse
+        # the already-computed full-H top-5 and skip a second (very expensive)
+        # LOBPCG call.
+        skip_batch_h = X_batch.shape[0] >= len(self.X)
+        if skip_batch_h:
+            if not self._batch_h_skip_logged:
+                print("ProjectionTracker: batch-H path skipped "
+                      f"(batch {X_batch.shape[0]} >= dataset {len(self.X)}); "
+                      "reusing full-H top-5.")
+                self._batch_h_skip_logged = True
+            wb_top5 = w_top5
+        else:
+            with torch.enable_grad():
+                preds_b = self.net(X_batch).squeeze(dim=-1)
+                loss_b = self.loss_fn(preds_b, Y_batch)
+            _, wb_top5 = self._top5_eigenvectors(loss_b, self._eigvec_cache_batch)
+
+        # 5. Preconditioned top-5 (Adam / RMSProp only)
+        w_precond_top5 = None
+        wb_precond_top5 = None
+        lam_precond_top5 = np.full(TOP_K, np.nan, dtype=np.float32)
+        cos_precond = np.full(TOP_K, np.nan, dtype=np.float32)
 
         if self._has_preconditioner:
             D_inv_sqrt = self._optimizer_wrapper.get_preconditioner_inv_sqrt()
             if D_inv_sqrt is not None:
-                # Full preconditioned Hessian eigenvector
+                # Full preconditioned Hessian top-5
                 with torch.enable_grad():
                     preds_p = self.net(X_sub).squeeze(dim=-1)
                     loss_p = self.loss_fn(preds_p, Y_sub)
-                lam_precond, w_precond = self._precond_power_iteration(
+                lam_p, w_precond_top5 = self._top5_precond_eigenvectors(
                     loss_p, self._eigvec_cache_precond_full, D_inv_sqrt)
+                lam_precond_top5 = lam_p.cpu().numpy().astype(np.float32)
 
-                # Capture fixed preconditioned eigenvector at the first tracked step
-                if self._fixed_u and self._fixed_u_precond_vec is None:
-                    self._fixed_u_precond_vec = w_precond.clone()
+                if self._fixed_top5_precond is None:
+                    self._fixed_top5_precond = w_precond_top5.clone()
 
-                # Batch preconditioned Hessian eigenvector
-                with torch.enable_grad():
-                    preds_pb = self.net(X_batch).squeeze(dim=-1)
-                    loss_pb = self.loss_fn(preds_pb, Y_batch)
-                lam_precond_batch, w_b_precond = self._precond_power_iteration(
-                    loss_pb, self._eigvec_cache_precond_batch, D_inv_sqrt)
+                if self._prev_w_top5_precond is None:
+                    cos_precond = np.full(TOP_K, np.nan, dtype=np.float32)
+                else:
+                    cos_precond = np.array([
+                        abs(torch.dot(
+                            self._prev_w_top5_precond[:, k],
+                            w_precond_top5[:, k]
+                        )).item()
+                        for k in range(TOP_K)
+                    ], dtype=np.float32)
+                self._prev_w_top5_precond = w_precond_top5.clone()
+
+                # Batch preconditioned Hessian top-5 (skip when batch covers
+                # full dataset — same reasoning as non-precond path above).
+                if skip_batch_h:
+                    wb_precond_top5 = w_precond_top5
+                else:
+                    with torch.enable_grad():
+                        preds_pb = self.net(X_batch).squeeze(dim=-1)
+                        loss_pb = self.loss_fn(preds_pb, Y_batch)
+                    _, wb_precond_top5 = self._top5_precond_eigenvectors(
+                        loss_pb, self._eigvec_cache_precond_batch, D_inv_sqrt)
 
         # Stash for post_step
-        self._pending_step           = step
-        self._pending_theta_t        = theta_t
-        self._pending_g_t            = g_t
-        self._pending_g_full         = g_full_t
-        self._pending_w_t            = w_t
-        self._pending_wb_t           = w_b_t
-        self._pending_w_precond      = w_precond
-        self._pending_wb_precond     = w_b_precond
-        self._pending_lam_precond    = lam_precond
-        self._pending_lam_precond_batch = lam_precond_batch
+        self._pending_step                 = step
+        self._pending_theta_t              = theta_t
+        self._pending_g_t                  = g_t
+        self._pending_g_full               = g_full_t
+        self._pending_w_top5               = w_top5
+        self._pending_wb_top5              = wb_top5
+        self._pending_w_precond_top5       = w_precond_top5
+        self._pending_wb_precond_top5      = wb_precond_top5
+        self._pending_cos_full             = cos_full
+        self._pending_cos_precond          = cos_precond
+        self._pending_lambda_top5          = lam_top5.cpu().numpy().astype(np.float32)
+        self._pending_lambda_precond_top5  = lam_precond_top5
 
         return theta_t
 
@@ -304,50 +372,48 @@ class ProjectionTracker:
 
         dot = torch.dot
 
+        def _projections(theta, W):
+            # W: [n_params, 5] → return np array [5] of ⟨theta, W[:, k]⟩
+            if W is None:
+                return np.full(TOP_K, np.nan, dtype=np.float32)
+            return np.array(
+                [dot(theta, W[:, k]).item() for k in range(TOP_K)],
+                dtype=np.float32,
+            )
+
         self._steps.append(step)
         self._proj_g_full.append(dot(theta_t, self._pending_g_full).item())
         self._proj_g.append(dot(theta_t, self._pending_g_t).item())
         self._proj_h.append(dot(theta_t, h_t).item())
 
-        # Fixed full-Hessian eigenvector projection (NaN if fixed_u=False)
-        if self._fixed_u_vec is not None:
-            self._proj_w_fixed.append(dot(theta_t, self._fixed_u_vec).item())
-        else:
-            self._proj_w_fixed.append(float('nan'))
+        self._proj_w_top5.append(_projections(theta_t, self._pending_w_top5))
+        self._proj_wb_top5.append(_projections(theta_t, self._pending_wb_top5))
+        self._proj_w_fixed_top5.append(_projections(theta_t, self._fixed_top5_full))
+        self._cos_sim_full_top5.append(self._pending_cos_full)
+        self._lambda_top5.append(self._pending_lambda_top5)
 
-        self._proj_w.append(dot(theta_t, self._pending_w_t).item())
-        self._proj_wb.append(dot(theta_t, self._pending_wb_t).item())
-
-        # Fixed preconditioned eigenvector projection (NaN if fixed_u=False or no preconditioner)
-        if self._fixed_u_precond_vec is not None:
-            self._proj_w_precond_fixed.append(dot(theta_t, self._fixed_u_precond_vec).item())
-        else:
-            self._proj_w_precond_fixed.append(float('nan'))
-
-        if self._pending_w_precond is not None:
-            self._proj_w_precond.append(dot(theta_t, self._pending_w_precond).item())
-        else:
-            self._proj_w_precond.append(float('nan'))
-
-        if self._pending_wb_precond is not None:
-            self._proj_wb_precond.append(dot(theta_t, self._pending_wb_precond).item())
-        else:
-            self._proj_wb_precond.append(float('nan'))
-
-        self._lambda_precond.append(self._pending_lam_precond)
-        self._lambda_precond_batch.append(self._pending_lam_precond_batch)
+        self._proj_w_precond_top5.append(_projections(theta_t, self._pending_w_precond_top5))
+        self._proj_wb_precond_top5.append(_projections(theta_t, self._pending_wb_precond_top5))
+        self._proj_w_precond_fixed_top5.append(_projections(theta_t, self._fixed_top5_precond))
+        self._cos_sim_precond_top5.append(self._pending_cos_precond)
+        self._lambda_precond_top5.append(self._pending_lambda_precond_top5)
 
         # Clear stash
         self._pending_step = None
         self._pending_theta_t = None
         self._pending_g_t = None
         self._pending_g_full = None
-        self._pending_w_t = None
-        self._pending_wb_t = None
-        self._pending_w_precond = None
-        self._pending_wb_precond = None
-        self._pending_lam_precond = None
-        self._pending_lam_precond_batch = None
+        self._pending_w_top5 = None
+        self._pending_wb_top5 = None
+        self._pending_w_precond_top5 = None
+        self._pending_wb_precond_top5 = None
+        self._pending_cos_full = None
+        self._pending_cos_precond = None
+        self._pending_lambda_top5 = None
+        self._pending_lambda_precond_top5 = None
+
+        if self._save_every and len(self._steps) % self._save_every == 0:
+            self.save()
 
     def save(self):
         """Save all recorded projections to projections.npz in save_dir."""
@@ -355,25 +421,33 @@ class ProjectionTracker:
             print("ProjectionTracker: no data recorded, skipping save.")
             return
 
-        n = len(self._steps)
-        nan_arr = lambda: np.full(n, np.nan, dtype=np.float32)
+        def stack(rows):
+            return np.stack(rows, axis=0).astype(np.float32)
 
         out_path = self.save_dir / 'projections.npz'
+        # np.savez auto-appends .npz; name the temp file so that the appended
+        # suffix lands us at 'projections.tmp.npz', which we then atomic-rename.
+        tmp_path = self.save_dir / 'projections.tmp.npz'
+        # Write to temp path then atomic-rename so a mid-write kill can't corrupt
+        # the existing snapshot.
         np.savez(
-            out_path,
+            tmp_path,
             steps=np.array(self._steps, dtype=np.int64),
-            proj_g_full=np.array(self._proj_g_full,         dtype=np.float32),
-            proj_g=np.array(self._proj_g,                   dtype=np.float32),
-            proj_h=np.array(self._proj_h,                   dtype=np.float32),
-            proj_w_fixed=np.array(self._proj_w_fixed,       dtype=np.float32) if self._proj_w_fixed else nan_arr(),
-            proj_w=np.array(self._proj_w,                   dtype=np.float32),
-            proj_wb=np.array(self._proj_wb,                 dtype=np.float32),
-            proj_w_precond_fixed=np.array(self._proj_w_precond_fixed, dtype=np.float32) if self._proj_w_precond_fixed else nan_arr(),
-            proj_w_precond=np.array(self._proj_w_precond,   dtype=np.float32),
-            proj_wb_precond=np.array(self._proj_wb_precond, dtype=np.float32),
-            lambda_precond=np.array(self._lambda_precond,   dtype=np.float32),
-            lambda_precond_batch=np.array(self._lambda_precond_batch, dtype=np.float32),
+            proj_g_full=np.array(self._proj_g_full, dtype=np.float32),
+            proj_g=np.array(self._proj_g, dtype=np.float32),
+            proj_h=np.array(self._proj_h, dtype=np.float32),
+            proj_w_top5=stack(self._proj_w_top5),
+            proj_wb_top5=stack(self._proj_wb_top5),
+            proj_w_fixed_top5=stack(self._proj_w_fixed_top5),
+            cos_sim_full_top5=stack(self._cos_sim_full_top5),
+            lambda_top5=stack(self._lambda_top5),
+            proj_w_precond_top5=stack(self._proj_w_precond_top5),
+            proj_wb_precond_top5=stack(self._proj_wb_precond_top5),
+            proj_w_precond_fixed_top5=stack(self._proj_w_precond_fixed_top5),
+            cos_sim_precond_top5=stack(self._cos_sim_precond_top5),
+            lambda_precond_top5=stack(self._lambda_precond_top5),
             track_from=np.int64(self.track_from),
             track_until=np.int64(self.track_until),
         )
+        tmp_path.replace(out_path)
         print(f"ProjectionTracker: saved {len(self._steps)} steps to {out_path}")

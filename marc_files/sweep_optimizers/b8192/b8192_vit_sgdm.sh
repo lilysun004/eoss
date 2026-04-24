@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J vit_sgdm_b8192
-#SBATCH -p kempner_requeue
+#SBATCH -p kempner_h100
 #SBATCH -A kempner_kdbrantley_lab
 #SBATCH -c 16
 #SBATCH --gres=gpu:1

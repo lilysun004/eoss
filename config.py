@@ -94,6 +94,10 @@ measurement_batch_size_cap = None  # cap second-order measurement batches; None 
 track_from          = 20000    # step to start recording projections (None = disabled)
 track_until         = 30000    # step to stop recording projections (None = disabled)
 fixed_u             = False    # True = fix top Hessian eigenvec at track_from and reuse
+projection_save_every = 100    # flush projections.npz every N tracked steps (0 = only at end)
+track_stride        = 10       # record every Nth step within [track_from, track_until]
+lobpcg_max_iters    = 20       # LOBPCG inner-loop cap for projection tracker top-5
+lobpcg_reltol       = 0.02     # LOBPCG convergence tolerance for projection tracker top-5
 
 # --- Measurement frequency ---
 more_freq_measure   = False    # True = halve all measurement intervals
@@ -244,5 +248,9 @@ if __name__ == '__main__':
         track_from=track_from,
         track_until=track_until,
         fixed_u=fixed_u,
+        projection_save_every=projection_save_every,
+        track_stride=track_stride,
+        lobpcg_max_iters=lobpcg_max_iters,
+        lobpcg_reltol=lobpcg_reltol,
         measurement_batch_size_cap=measurement_batch_size_cap,
     )

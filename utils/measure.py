@@ -407,7 +407,7 @@ def compute_eigenvalues(loss,
         # Use LOBPCG method (default)
         eigenvalues, eigenvectors = compute_multiple_eigenvalues_lobpcg(
             loss, net, k, max_iterations, reltol, init_vectors,
-            eigenvector_cache, return_eigenvectors=True
+            eigenvector_cache, return_eigenvectors=True, grads=grads,
         )
 
         if k == 1:
@@ -482,11 +482,17 @@ def _run_lobpcg_with_operator(
 
 def compute_multiple_eigenvalues_lobpcg(loss, net, k=5, max_iterations=100, reltol=1e-2,
                                        init_vectors=None, eigenvector_cache=None,
-                                       return_eigenvectors=False):
+                                       return_eigenvectors=False, grads=None):
     """
     Compute multiple eigenvalues of the Hessian using LOBPCG algorithm.
+
+    If `grads` is provided (tuple of per-parameter tensors with create_graph=True),
+    it is reused instead of calling autograd.grad internally.
     """
-    hessian_matvec = create_hessian_vector_product(loss, net)
+    params = list(net.parameters()) if grads is not None else None
+    hessian_matvec = create_hessian_vector_product(
+        loss, net, params=params, grads=grads, retain_graph=True,
+    )
     try:
         return _run_lobpcg_with_operator(
             hessian_matvec,
