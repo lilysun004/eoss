@@ -119,10 +119,15 @@ class MeasurementRunner:
         if self._dist_records:
             keys = [k for k in self._dist_records[0] if k != 'step']
             payload = {'steps': np.array([r['step'] for r in self._dist_records])}
-            # Per-record arrays may have ragged lengths because the probe loop
-            # has an RSE early-exit. Pad with NaN to the max length.
             for k in keys:
                 arrs = [np.asarray(r[k], dtype=np.float64) for r in self._dist_records]
+                # Scalar entries (e.g. gnorm_full) stack to a 1-D per-step vector.
+                if all(a.ndim == 0 for a in arrs):
+                    payload[k] = np.stack(arrs)
+                    continue
+                # Per-step arrays may be ragged because the probe loop has an
+                # RSE early-exit. Pad with NaN to the max length.
+                arrs = [np.atleast_1d(a) for a in arrs]
                 max_len = max(a.shape[0] for a in arrs)
                 padded = np.full((len(arrs), max_len), np.nan, dtype=np.float64)
                 for i, a in enumerate(arrs):
