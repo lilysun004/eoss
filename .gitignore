@@ -9,6 +9,12 @@ datasets/
 
 # Results
 results/
+marc_files/logs/
+marc_files/results_histograms/
+marc_files/results_histograms_pdf/
+
+# Editor / tool scratch
+.codex
 
 # Wandb
 wandb/

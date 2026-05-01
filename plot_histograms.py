@@ -33,7 +33,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 
 
 TOP_K = 5
@@ -68,7 +68,7 @@ def plot_training_curve(ax, run_folder: Path, track_from: int, track_until: int,
     Optionally overlay λ_max(D^{-1/2}HD^{-1/2}) in the tracking window (k=1 column)."""
     results_path = run_folder / 'results.txt'
     if not results_path.exists():
-        ax.set_title('No results.txt', fontsize=10)
+        ax.set_title('No results.txt', fontsize=15)
         return
 
     df = pd.read_csv(results_path, comment='#')
@@ -77,58 +77,60 @@ def plot_training_curve(ax, run_folder: Path, track_from: int, track_until: int,
     loss = df[['step', 'full_loss']].dropna()
     if not loss.empty:
         ax_loss.semilogy(loss['step'], loss['full_loss'],
-                         color='#cccccc', linewidth=0.8, label='loss', zorder=1)
-        ax_loss.set_ylabel('Loss (log)', fontsize=8, color='#999999')
-        ax_loss.tick_params(labelsize=7, colors='#999999')
-        ax_loss.yaxis.label.set_color('#999999')
+                         color='#aaaaaa', linewidth=1.4, label='loss', zorder=1)
+        ax_loss.set_ylabel('Loss (log)', fontsize=14, color='#555555')
+        ax_loss.tick_params(labelsize=14, colors='#555555')
+        ax_loss.yaxis.label.set_color('#555555')
 
     lm = df[['step', 'lmax']].dropna()
     if not lm.empty:
-        ax.plot(lm['step'], lm['lmax'], color='#1f77b4', linewidth=0.9,
+        ax.plot(lm['step'], lm['lmax'], color='#1f77b4', linewidth=1.6,
                 label=r'$\lambda_{max}$', zorder=3)
 
     bs = df[['step', 'batch_sharpness']].dropna()
     if not bs.empty:
-        ax.plot(bs['step'], bs['batch_sharpness'], color='#2ca02c', linewidth=0.9,
+        ax.plot(bs['step'], bs['batch_sharpness'], color='#2ca02c', linewidth=1.6,
                 label='batch sharp.', zorder=3)
 
     if lambda_top1_precond is not None and steps_precond is not None:
         valid = ~np.isnan(lambda_top1_precond)
         if valid.any():
             ax.scatter(steps_precond[valid], lambda_top1_precond[valid],
-                       color='#9467bd', s=3, label=r'$\lambda_{max}(\tilde{H})$', zorder=4)
+                       color='#9467bd', s=8, label=r'$\lambda_{max}(\tilde{H})$', zorder=4)
 
-    ax.axvspan(track_from, track_until, alpha=0.08, color='orange', label='tracked')
+    ax.axvspan(track_from, track_until, alpha=0.10, color='orange', label='tracked')
 
-    ax.set_xlabel('step', fontsize=8)
-    ax.set_ylabel(r'Sharpness / $\lambda_{max}$', fontsize=8)
-    ax.tick_params(labelsize=7)
-    ax.set_title('Training dynamics', fontsize=10)
+    ax.set_xlabel('step', fontsize=18)
+    ax.set_ylabel(r'Batch Sharpness / $\lambda_{max}$', fontsize=18)
+    ax.tick_params(labelsize=16)
+    ax.set_title('Training Dynamics', fontsize=26)
 
     lines1, labels1 = ax.get_legend_handles_labels()
     lines2, labels2 = ax_loss.get_legend_handles_labels()
-    ax.legend(lines1 + lines2, labels1 + labels2, fontsize=7, framealpha=0.6,
+    ax.legend(lines1 + lines2, labels1 + labels2, fontsize=17, framealpha=0.7,
               loc='upper right')
 
 
-def plot_histogram(ax, values, title, bins, show_ylabel=False):
+def plot_histogram(ax, values, title, bins, show_ylabel=False, color='steelblue',
+                   show_mean=True):
     clean = values[~np.isnan(values)]
     if clean.size == 0:
         ax.set_visible(False)
         return
-    ax.hist(clean, bins=bins, color='steelblue', edgecolor='white', linewidth=0.3)
-    ax.set_title(title, fontsize=9)
+    ax.hist(clean, bins=bins, color=color, edgecolor='white', linewidth=0.5)
+    ax.set_title(title, fontsize=26)
     if show_ylabel:
-        ax.set_ylabel('Count', fontsize=7)
-    ax.tick_params(labelsize=6)
+        ax.set_ylabel('Count', fontsize=18)
+    ax.tick_params(labelsize=16)
 
-    mean = float(np.nanmean(values))
-    std  = float(np.nanstd(values))
-    ax.axvline(mean, color='firebrick', linewidth=1.0, linestyle='--')
-    ax.text(0.97, 0.95, f'μ={mean:.3g}\nσ={std:.3g}', transform=ax.transAxes,
-            ha='right', va='top', fontsize=6, color='#444',
-            bbox=dict(boxstyle='round,pad=0.2', facecolor='white',
-                      edgecolor='none', alpha=0.6))
+    if show_mean:
+        mean = float(np.nanmean(values))
+        std  = float(np.nanstd(values))
+        ax.axvline(mean, color='firebrick', linewidth=1.6, linestyle='--')
+        ax.text(0.97, 0.95, f'μ={mean:.3g}\nσ={std:.3g}', transform=ax.transAxes,
+                ha='right', va='top', fontsize=13, color='#333',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
+                          edgecolor='none', alpha=0.75))
 
 
 def plot_cos_sim(ax, steps, cos_arr, title):
@@ -141,14 +143,14 @@ def plot_cos_sim(ax, steps, cos_arr, title):
         valid = ~np.isnan(y)
         if not valid.any():
             continue
-        ax.plot(steps[valid], y[valid], color=K_COLORS[k], linewidth=0.9,
+        ax.plot(steps[valid], y[valid], color=K_COLORS[k], linewidth=1.5,
                 label=f'k={k+1}')
     ax.set_ylim(-0.05, 1.05)
-    ax.set_xlabel('step', fontsize=8)
-    ax.set_ylabel(r'$|\langle w_k(t{-}1),\, w_k(t)\rangle|$', fontsize=8)
-    ax.set_title(title, fontsize=10)
-    ax.tick_params(labelsize=7)
-    ax.legend(fontsize=7, framealpha=0.6, loc='lower right', ncol=5)
+    ax.set_xlabel('step', fontsize=18)
+    ax.set_ylabel(r'$|\langle w_k(t{-}1),\, w_k(t)\rangle|$', fontsize=18)
+    ax.set_title(title, fontsize=26)
+    ax.tick_params(labelsize=16)
+    ax.legend(fontsize=17, framealpha=0.7, loc='lower right', ncol=5)
     ax.grid(True, alpha=0.3)
 
 
@@ -168,7 +170,7 @@ def _add_row_label(fig, gs, row, text):
     ax = fig.add_subplot(gs[row, :])
     ax.axis('off')
     ax.text(-0.015, 0.5, text, transform=ax.transAxes,
-            ha='right', va='center', fontsize=10, fontweight='bold',
+            ha='right', va='center', fontsize=14, fontweight='bold',
             rotation=0)
 
 
@@ -184,72 +186,88 @@ def make_main_png(run_folder, data, out_path, bins, has_precond, run_title):
         if lp.size > 0:
             lambda_precond_top1 = lp[:, 0]
 
-    # 6 rows × 5 cols. Row 0 is training curve (spans all cols); row 1 has only 3 hists.
-    nrows, ncols = 6, 5
-    fig = plt.figure(figsize=(26, 22))
-    gs = GridSpec(nrows, ncols, figure=fig,
-                  height_ratios=[1.2, 1.0, 1.0, 1.0, 1.0, 1.0],
-                  hspace=0.55, wspace=0.35)
-
-    fig.suptitle(
-        f'{run_title}  |  steps {track_from}–{track_until}  ({n_steps} recorded)',
-        fontsize=12,
+    # 5 rows × 5 cols. Row 0 merges training curve (cols 0–1) + 3 basic hists (cols 2–4).
+    # Use nested GridSpecs so the top row can have a wider wspace (room for twin-y loss label)
+    # while the other rows stay tightly packed.
+    nrows, ncols = 5, 5
+    fig = plt.figure(figsize=(30, 26))
+    outer_gs = GridSpec(nrows, 1, figure=fig,
+                        height_ratios=[1.3, 1.0, 1.0, 1.0, 1.0],
+                        hspace=0.34,
+                        top=0.935, bottom=0.025, left=0.045, right=0.995)
+    gs_top = GridSpecFromSubplotSpec(
+        1, ncols, subplot_spec=outer_gs[0], wspace=0.34,
+        width_ratios=[0.92, 0.92, 1.05, 1.05, 1.05],
     )
+    gs_rows = [GridSpecFromSubplotSpec(1, ncols, subplot_spec=outer_gs[r], wspace=0.18)
+               for r in range(1, nrows)]
 
-    # Row 0: training curve (spans all 5 cols)
-    ax_curve = fig.add_subplot(gs[0, :])
+    fig.suptitle(run_title, fontsize=38, fontweight='bold', y=0.985)
+
+    # Row 0a: training curve (cols 0–1)
+    ax_curve = fig.add_subplot(gs_top[0, 0:2])
     plot_training_curve(
         ax_curve, run_folder, track_from, track_until,
         lambda_top1_precond=lambda_precond_top1,
         steps_precond=steps if has_precond else None,
     )
 
-    # Row 1: 3 basic histograms in cols 0, 1, 2 (cols 3, 4 empty)
+    # Row 0b: 3 basic histograms in cols 2, 3, 4
     basic = [
         ('proj_g_full', r'$\langle\theta_t,\, \mathbb{E}[g_t]\rangle$'),
         ('proj_g',      r'$\langle\theta_t,\, g_t\rangle$'),
         ('proj_h',      r'$\langle\theta_t,\, h_t\rangle$'),
     ]
     for i, (key, label) in enumerate(basic):
-        ax = fig.add_subplot(gs[1, i])
+        ax = fig.add_subplot(gs_top[0, 2 + i])
         if key in data:
             plot_histogram(ax, data[key], label, bins, show_ylabel=(i == 0))
         else:
             ax.set_visible(False)
 
-    # Rows 2–4: top-5 histograms per family
+    # Rows 1–3: top-5 histograms per family
     families = [
-        (2, 'proj_w_top5',       r'$\langle\theta_t,\, w^{\mathrm{full}}_{%d}(t)\rangle$',
-            'Full-H top-5 (per-step)'),
-        (3, 'proj_wb_top5',      r'$\langle\theta_t,\, w^{\mathrm{batch}}_{%d}(t)\rangle$',
-            'Batch-H top-5 (per-step)'),
-        (4, 'proj_w_fixed_top5', r'$\langle\theta_t,\, w^{\mathrm{fixed}}_{%d}\rangle$',
-            'Full-H top-5 (fixed at track_from)'),
+        (1, 'proj_w_top5',       r'$\langle\theta_t,\, w^{\mathrm{full}}_{%d}(t)\rangle$',
+            'Full H top-5 Eigenvec Count'),
+        (2, 'proj_wb_top5',      r'$\langle\theta_t,\, w^{\mathrm{batch}}_{%d}(t)\rangle$',
+            'Batch H top-5 Eigenvec Count'),
+        (3, 'proj_w_fixed_top5', r'$\langle\theta_t,\, w^{\mathrm{fixed}}_{%d}\rangle$',
+            'Full H top-5 Fixed Eigenvec Count'),
     ]
     for row, key, label_fmt, row_name in families:
         arr = data[key] if key in data else None
         if arr is None:
             continue
         for k in range(TOP_K):
-            ax = fig.add_subplot(gs[row, k])
+            ax = fig.add_subplot(gs_rows[row - 1][0, k])
             if _all_nan(arr[:, k]):
                 ax.set_visible(False)
                 continue
-            title = f'{row_name}  —  k={k+1}' if k == 0 else f'k={k+1}'
             plot_histogram(ax, arr[:, k], label_fmt % (k + 1), bins,
-                           show_ylabel=(k == 0))
+                           show_ylabel=(k == 0), color=K_COLORS[k])
+            if key == 'proj_w_fixed_top5':
+                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=4))
             if k == 0:
-                ax.set_ylabel(f'{row_name}\nCount', fontsize=8)
+                ax.set_ylabel(row_name, fontsize=18)
 
-    # Row 5: cosine similarity (span all cols)
-    ax_cos = fig.add_subplot(gs[5, :])
+    # Row 4: cosine similarity histograms (5 cells, one per k)
     cos = data['cos_sim_full_top5'] if 'cos_sim_full_top5' in data else None
-    plot_cos_sim(ax_cos, steps, cos,
-                 'Cosine similarity of full-H top-5 eigenvectors across consecutive tracked steps')
+    if cos is not None and not _all_nan(cos):
+        for k in range(TOP_K):
+            ax = fig.add_subplot(gs_rows[3][0, k])
+            if _all_nan(cos[:, k]):
+                ax.set_visible(False)
+                continue
+            label = r'$|\langle w^{\mathrm{full}}_{%d}(t{-}1),\, w^{\mathrm{full}}_{%d}(t)\rangle|$' % (k + 1, k + 1)
+            plot_histogram(ax, cos[:, k], label, bins,
+                           show_ylabel=(k == 0), color=K_COLORS[k],
+                           show_mean=False)
+            if k == 0:
+                ax.set_ylabel('Cosine Similarity Counts', fontsize=18)
 
-    plt.savefig(out_path, dpi=130, bbox_inches='tight')
+    plt.savefig(out_path, dpi=150, bbox_inches='tight', pad_inches=0.35)
     plt.close(fig)
-    print(f"Saved main PNG to {out_path}")
+    print(f"Saved main figure to {out_path}")
 
 
 def make_precond_png(run_folder, data, out_path, bins, run_title):
@@ -265,14 +283,14 @@ def make_precond_png(run_folder, data, out_path, bins, run_title):
             lambda_precond_top1 = lp[:, 0]
 
     nrows, ncols = 5, 5
-    fig = plt.figure(figsize=(26, 19))
+    fig = plt.figure(figsize=(30, 22))
     gs = GridSpec(nrows, ncols, figure=fig,
                   height_ratios=[1.2, 1.0, 1.0, 1.0, 1.0],
                   hspace=0.55, wspace=0.35)
 
     fig.suptitle(
         f'{run_title}  |  PRECONDITIONED  |  steps {track_from}–{track_until}  ({n_steps} recorded)',
-        fontsize=12,
+        fontsize=18,
     )
 
     # Row 0: training curve
@@ -301,19 +319,28 @@ def make_precond_png(run_folder, data, out_path, bins, run_title):
                 ax.set_visible(False)
                 continue
             plot_histogram(ax, arr[:, k], label_fmt % (k + 1), bins,
-                           show_ylabel=(k == 0))
+                           show_ylabel=(k == 0), color=K_COLORS[k])
             if k == 0:
-                ax.set_ylabel(f'{row_name}\nCount', fontsize=8)
+                ax.set_ylabel(f'{row_name}\nCount', fontsize=18)
 
-    # Row 4: cosine similarity (precond)
-    ax_cos = fig.add_subplot(gs[4, :])
+    # Row 4: cosine similarity histograms (precond) — 5 cells, one per k
     cos = data['cos_sim_precond_top5'] if 'cos_sim_precond_top5' in data else None
-    plot_cos_sim(ax_cos, steps, cos,
-                 'Cosine similarity of preconditioned full-H top-5 eigenvectors across consecutive tracked steps')
+    if cos is not None and not _all_nan(cos):
+        for k in range(TOP_K):
+            ax = fig.add_subplot(gs[4, k])
+            if _all_nan(cos[:, k]):
+                ax.set_visible(False)
+                continue
+            label = r'$|\langle \tilde{w}^{\mathrm{full}}_{%d}(t{-}1),\, \tilde{w}^{\mathrm{full}}_{%d}(t)\rangle|$' % (k + 1, k + 1)
+            plot_histogram(ax, cos[:, k], label, bins,
+                           show_ylabel=(k == 0), color=K_COLORS[k],
+                           show_mean=False)
+            if k == 0:
+                ax.set_ylabel('Cosine Similarity Counts', fontsize=18)
 
-    plt.savefig(out_path, dpi=130, bbox_inches='tight')
+    plt.savefig(out_path, dpi=150, bbox_inches='tight', pad_inches=0.35)
     plt.close(fig)
-    print(f"Saved precond PNG to {out_path}")
+    print(f"Saved precond figure to {out_path}")
 
 
 def main():
@@ -344,8 +371,8 @@ def main():
         precond_out = main_out.with_name(main_out.stem + '_precond' + main_out.suffix)
     else:
         safe_title = run_title.replace(' ', '_').replace('=', '').replace('/', '-')
-        main_out = run_folder / f'histograms_{safe_title}.png'
-        precond_out = run_folder / f'histograms_{safe_title}_precond.png'
+        main_out = run_folder / f'histograms_{safe_title}.pdf'
+        precond_out = run_folder / f'histograms_{safe_title}_precond.pdf'
 
     make_main_png(run_folder, data, main_out, args.bins, has_precond, run_title)
 
