@@ -8,7 +8,7 @@
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
 #SBATCH --time=06:00:00
-#SBATCH --array=0-23
+#SBATCH --array=0-29
 
 # ============================================================================
 # SST-2 SSTTransformer bimodality sweep — 6 optimizers × 4 batch sizes = 24 cells
@@ -66,6 +66,13 @@ case "$SLURM_ARRAY_TASK_ID" in
   21) OPT="Muon";         LR="0.001";   PARAMS="{'momentum': 0.9}";             BATCH="32"   ;;
   22) OPT="Muon";         LR="0.001";   PARAMS="{'momentum': 0.9}";             BATCH="128"  ;;
   23) OPT="Muon";         LR="0.001";   PARAMS="{'momentum': 0.9}";             BATCH="1024" ;;
+  # b=8192 = full-batch (num_data=8192). Deterministic GD, batch sharpness == λ_max.
+  24) OPT="SGD";          LR="0.02";    PARAMS="";                              BATCH="8192" ;;
+  25) OPT="SGD-Momentum"; LR="0.002";   PARAMS="{'beta': 0.9}";                 BATCH="8192" ;;
+  26) OPT="SGD-Nesterov"; LR="0.002";   PARAMS="{'beta': 0.9}";                 BATCH="8192" ;;
+  27) OPT="Adam";         LR="0.00003"; PARAMS="{'beta1': 0.9, 'beta2': 0.99}"; BATCH="8192" ;;
+  28) OPT="RMSProp";      LR="0.00003"; PARAMS="{'beta2': 0.99}";               BATCH="8192" ;;
+  29) OPT="Muon";         LR="0.001";   PARAMS="{'momentum': 0.9}";             BATCH="8192" ;;
   *) echo "Unknown array task: $SLURM_ARRAY_TASK_ID"; exit 1 ;;
 esac
 
