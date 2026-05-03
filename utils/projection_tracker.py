@@ -160,6 +160,8 @@ class ProjectionTracker:
                     cap = 1024
                 elif self.net.__class__.__name__ == 'ViT':
                     cap = 2048
+                elif self.net.__class__.__name__ == 'SSTTransformer':
+                    cap = 2048
         return cap
 
     def _get_subset(self):
@@ -263,7 +265,7 @@ class ProjectionTracker:
         with torch.enable_grad():
             preds_sub = self.net(X_sub).squeeze(dim=-1)
             loss_sub = self.loss_fn(preds_sub, Y_sub)
-            params_list = list(self.net.parameters())
+            params_list = [p for p in self.net.parameters() if p.requires_grad]
             grads_sub = torch.autograd.grad(loss_sub, params_list, create_graph=True)
         g_full_t = torch.cat([g.detach().flatten() for g in grads_sub])
 

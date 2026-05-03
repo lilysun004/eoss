@@ -50,14 +50,14 @@ gpu                = 0         # which GPU to use (0 or 1); None = default; 'cpu
 results_subfolder  = '0318_alloptimizers_targeted_finebatch'      # save inside RES_FOLDER/results_subfolder/; None = RES_FOLDER directly
 
 # --- Loss ---
-loss_type          = 'mse'     # 'mse' (SquaredLoss) | 'ce' (CrossEntropyLoss)
+loss_type          = 'mse'     # 'mse' (SquaredLoss) | 'ce' (CrossEntropyLoss) | 'logistic' (LogisticLoss; SST {-1,+1})
 
 # --- Dataset ---
-dataset            = 'cifar10' # 'cifar10' | 'cifar10_2cls' | 'cifar10_ez' | 'svhn' | 'fmnist' | 'cinic10' | 'imagenet32'
+dataset            = 'cifar10' # 'cifar10' | 'cifar10_2cls' | 'cifar10_ez' | 'svhn' | 'fmnist' | 'cinic10' | 'imagenet32' | 'sst2'
 num_data           = 8192      # number of training samples to use
 
 # --- Model ---
-model              = 'mlp'     # 'mlp' | 'mlp2' | 'mlp3' | 'mlp_s' | 'mlp_l' | 'mlp_silu' | 'mlp_tanh' | 'linear' | 'cnn' | 'resnet' | 'resnet_bn' | 'wrn' | 'wrn_no_bn'
+model              = 'mlp'     # 'mlp' | 'mlp2' | 'mlp3' | 'mlp_s' | 'mlp_l' | 'mlp_silu' | 'mlp_tanh' | 'linear' | 'cnn' | 'resnet' | 'resnet_bn' | 'wrn' | 'wrn_no_bn' | 'vit' | 'sst_transformer'
 init_scale         = 0.2       # weight initialization scale
 no_init            = False     # True = skip custom weight initialization
 
@@ -140,6 +140,12 @@ if model == 'vit':
     if 'measurement_batch_size_cap' not in _overridden_keys:
         measurement_batch_size_cap = 128
 
+if model == 'sst_transformer':
+    # Init handled inside SSTTransformer.__init__ (head zero-init, embeddings frozen);
+    # initialize_net's branch is a no-op, so init_scale does not apply.
+    if 'measurement_batch_size_cap' not in _overridden_keys:
+        measurement_batch_size_cap = 128
+
 
 # =============================================
 # EVERYTHING BELOW RUNS THE EXPERIMENT
@@ -192,6 +198,9 @@ if __name__ == '__main__':
         loss_fn = SquaredLoss()
     elif loss_type == 'ce':
         loss_fn = nn.CrossEntropyLoss()
+    elif loss_type == 'logistic':
+        from utils.nets import LogisticLoss
+        loss_fn = LogisticLoss()
 
     # ----- Dataset and Model -----
     dataset_presets = get_dataset_presets()

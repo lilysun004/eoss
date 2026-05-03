@@ -175,6 +175,18 @@ def get_model_presets():
                 'residual_scaling': True,
             },
         },
+        'sst_transformer': {
+            'type': 'sst_transformer',
+            'params': {
+                'vocab_size': 33278,
+                'seq_len': 64,
+                'd_model': 64,
+                'n_heads': 2,
+                'n_layers': 2,
+                'n_classes': 1,
+                'use_bert_emb': True,
+            },
+        },
     }
     return model_presets
 
@@ -346,6 +358,117 @@ class Linear(nn.Module):
         return f"Linear({self.input_dim}, {self.hidden_dim}, {self.n_layers}, {self.output_dim})"
 
 
+class LogisticLoss(nn.Module):
+    """Binary logistic loss for {-1, +1} labels.
+
+    Replicates Damian et al. (arXiv:2209.15594) SST-2 criterion:
+        L = mean(-log_sigmoid(output * label))
+    where output is (B, 1) and label is (B,) float {-1, +1}.
+    """
+    def forward(self, input, target):
+        # input: (B, 1) or (B,), target: (B,) float {-1, +1}
+        return -F.logsigmoid(input.squeeze(-1) * target).mean()
+
+
+_BERT_PROJ_CACHE_PATHS = [
+    "/n/holylabs/LABS/kdbrantley_lab/Lab/mwalden/bert_emb_proj64.pt",  # Harvard
+    "~/bert_emb_proj64.pt",                                             # MIT / other clusters
+]
+
+def load_bert_embeddings_projected(vocab_size=33278, d_model=64):
+    """Load bert-base-uncased word embeddings projected to d_model dims via SVD.
+
+    Loads from a precomputed cache file if available (fast). Otherwise computes
+    from scratch: SVD of BERT's 30522×768 embedding matrix, top-d_model components,
+    normalized to zero mean / unit std. Remaining vocab rows (30522:vocab_size) are zero
+    (those token ids never appear in SST-2 data).
+
+    Returns a (vocab_size, d_model) tensor, detached, ready to copy into Embedding.weight.
+    """
+    import os
+    if d_model == 64 and vocab_size == 33278:
+        for cache_path in _BERT_PROJ_CACHE_PATHS:
+            cache_path = os.path.expanduser(cache_path)
+            if os.path.exists(cache_path):
+                return torch.load(cache_path, weights_only=True)
+    from transformers import AutoModel
+    model = AutoModel.from_pretrained("bert-base-uncased")
+    W = model.embeddings.word_embeddings.weight.data.float().cpu()  # (30522, 768)
+    bert_vocab = W.shape[0]
+    del model
+    U, S, Vt = torch.linalg.svd(W, full_matrices=False)
+    W_proj = U[:, :d_model] * S[:d_model].unsqueeze(0)   # (30522, d_model)
+    W_proj = (W_proj - W_proj.mean(0)) / W_proj.std(0).clamp(min=1e-6)
+    out = torch.zeros(vocab_size, d_model)
+    out[:bert_vocab] = W_proj
+    out[0].zero_()  # Treat token id 0 as PAD so masked positions contribute nothing.
+    return out.detach()
+
+
+class SSTTransformerBlock(nn.Module):
+    """Bidirectional (encoder-style) transformer block with post-norm.
+
+    Matches Damian et al. (arXiv:2209.15594) models/transformer.py exactly:
+      x = LayerNorm(x + MultiHeadAttn(x))          # full attention, no causal mask
+      x = LayerNorm(x + Linear(GELU(Linear(x))))   # FF with no hidden expansion
+    """
+    def __init__(self, d_model, n_heads):
+        super().__init__()
+        # Disable flash/efficient attention so second-order gradients work
+        T.backends.cuda.enable_flash_sdp(False)
+        T.backends.cuda.enable_mem_efficient_sdp(False)
+        self.attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True, bias=False)
+        self.ln1 = nn.LayerNorm(d_model)
+        self.ff1 = nn.Linear(d_model, d_model, bias=False)
+        self.ff2 = nn.Linear(d_model, d_model, bias=False)
+        self.ln2 = nn.LayerNorm(d_model)
+
+    def forward(self, x, pad_mask=None):
+        # Full bidirectional attention — no causal mask
+        # pad_mask: (B, S) bool, True = PAD position to ignore (PyTorch key_padding_mask convention)
+        attn_out, _ = self.attn(x, x, x, key_padding_mask=pad_mask, need_weights=False)
+        x = self.ln1(x + attn_out)
+        x = self.ln2(x + self.ff2(F.gelu(self.ff1(x))))
+        return x
+
+
+class SSTTransformer(nn.Module):
+    """Small bidirectional transformer classifier for SST-2.
+
+    Replicates Damian et al. (arXiv:2209.15594) models/transformer.py exactly:
+      - vocab_size=33278 (bert-base-uncased), d_model=64, n_heads=2, n_layers=2, seq_len=64
+      - Token + positional embeddings (both learned)
+      - n_layers SSTTransformerBlocks (bidirectional, post-norm)
+      - Mean pool over sequence -> linear head (zero-initialized weight)
+    Intended for use with LogisticLoss and {-1, +1} labels.
+    """
+    def __init__(self, vocab_size=33278, seq_len=64, d_model=64, n_heads=2, n_layers=2, n_classes=1, use_bert_emb=False):
+        super().__init__()
+        self.tok_emb = nn.Embedding(vocab_size, d_model)
+        if use_bert_emb:
+            self.tok_emb.weight.data.copy_(load_bert_embeddings_projected(vocab_size, d_model))
+        self.tok_emb.weight.requires_grad_(False)  # frozen: sparse per-batch gradients would break batch sharpness
+        self.pos_emb = nn.Embedding(seq_len, d_model)
+        self.blocks = nn.ModuleList([SSTTransformerBlock(d_model, n_heads) for _ in range(n_layers)])
+        self.head = nn.Linear(d_model, n_classes, bias=True)
+        # Zero-initialize head weight and bias (matches Damian's kernel_init=zeros)
+        nn.init.zeros_(self.head.weight)
+        nn.init.zeros_(self.head.bias)
+
+    def forward(self, x):
+        # x: (B, S) long token ids; id=0 is [PAD]
+        B, S = x.shape
+        pad_mask = (x == 0)  # (B, S), True for [PAD] positions
+        pos = torch.arange(S, device=x.device).unsqueeze(0)  # (1, S)
+        h = self.tok_emb(x) + self.pos_emb(pos)
+        for block in self.blocks:
+            h = block(h, pad_mask=pad_mask)
+        # masked mean pool — only over real (non-PAD) positions
+        valid = (~pad_mask).float()  # (B, S)
+        h = (h * valid.unsqueeze(-1)).sum(1) / valid.sum(1, keepdim=True).clamp(min=1.0)
+        return self.head(h)  # (B, n_classes)
+
+
 def prepare_net(model_type: str,
                 params: dict
                 ):
@@ -390,6 +513,17 @@ def prepare_net(model_type: str,
             num_classes=params['output_dim'],
             use_layer_norm=params.get('use_layer_norm', False),
             residual_scaling=params.get('residual_scaling', False),
+        )
+
+    if model_type == 'sst_transformer':
+        net = SSTTransformer(
+            vocab_size=params.get('vocab_size', 33278),
+            seq_len=params.get('seq_len', 64),
+            d_model=params.get('d_model', 64),
+            n_heads=params.get('n_heads', 2),
+            n_layers=params.get('n_layers', 2),
+            n_classes=params.get('n_classes', 1),
+            use_bert_emb=params.get('use_bert_emb', True),
         )
 
     return net
@@ -608,6 +742,8 @@ def initialize_net(net, scale=None, seed=None):
             initialize_wrn_fixup(net)
         elif isinstance(net, ViT):
             initialize_vit(net, scale=scale, residual_scaling=net.residual_scaling)
+        elif isinstance(net, SSTTransformer):
+            pass  # head zero-init in SSTTransformer.__init__; embeddings/blocks use PyTorch defaults
         else:
             raise ValueError("Unknown net type")
 

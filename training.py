@@ -315,7 +315,7 @@ class MeasurementRunner:
                 _preds_gf = self.net(X_gf).squeeze(dim=-1)
                 _loss_gf = self.loss_fn(_preds_gf, Y_gf)
                 _loss_gf.backward()
-                grad_full = torch.cat([p.grad.flatten() for p in self.net.parameters()]).detach()
+                grad_full = torch.cat([p.grad.flatten() for p in self.net.parameters() if p.requires_grad]).detach()
                 self.net.zero_grad()
 
                 scalars, distributions = compute_gbs_probe_batches(

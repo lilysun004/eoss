@@ -89,19 +89,21 @@ class EigenvectorCache:
 
 def param_vector(net, clone=True):
     '''
-    Returns a vector of all the parameters of the network
-    If clone=True, returns a detached clone of the parameters
+    Returns a vector of all the trainable parameters of the network.
+    Frozen params (requires_grad=False, e.g. SSTTransformer.tok_emb) are excluded
+    so that ⟨θ, v⟩ projections match the eigenvector subspace.
+    If clone=True, returns a detached clone of the parameters.
     '''
-    param_vector = T.cat([p.flatten() for p in net.parameters()])
+    param_vector = T.cat([p.flatten() for p in net.parameters() if p.requires_grad])
     if clone:
         return param_vector.detach().clone()
     return param_vector
 
 def param_length(net):
     '''
-    Returns the number of parameters in the network
+    Returns the number of trainable parameters in the network.
     '''
-    params = list(net.parameters())
+    params = [p for p in net.parameters() if p.requires_grad]
     return sum([p.numel() for p in params])
 
 def flatt(vectors):
@@ -112,9 +114,11 @@ def flatt(vectors):
 
 
 def grads_vector(net):
-    # pull out all the gradients from a network as one vector
+    # pull out all the gradients from a network as one vector (trainable params only).
     grads = []
     for p in net.parameters():
+        if not p.requires_grad:
+            continue
         grads.append(p.grad.flatten().detach().clone())
     return T.cat(grads)
 
@@ -206,7 +210,7 @@ class HessianVectorProduct:
                  flat_grads: Optional[torch.Tensor] = None,
                  retain_graph: bool = True):
         if params is None:
-            params = list(net.parameters())
+            params = [p for p in net.parameters() if p.requires_grad]
         else:
             params = list(params)
 
@@ -489,7 +493,7 @@ def compute_multiple_eigenvalues_lobpcg(loss, net, k=5, max_iterations=100, relt
     If `grads` is provided (tuple of per-parameter tensors with create_graph=True),
     it is reused instead of calling autograd.grad internally.
     """
-    params = list(net.parameters()) if grads is not None else None
+    params = [p for p in net.parameters() if p.requires_grad] if grads is not None else None
     hessian_matvec = create_hessian_vector_product(
         loss, net, params=params, grads=grads, retain_graph=True,
     )
@@ -520,7 +524,7 @@ def compute_lambdamax_power_iteration(loss, net, max_iterations, reltol, init_ve
     device = next(net.parameters()).device
 
     # compute gradient and keep it for repeated Hessian-vector products
-    params = list(net.parameters())
+    params = [p for p in net.parameters() if p.requires_grad]
     if grads is None:
         grads = torch.autograd.grad(loss, params, create_graph=True)
     hessian_vector_product = create_hessian_vector_product(
@@ -611,7 +615,7 @@ def compute_grad_H_grad(loss, net, grad_already_there: bool = False,
 
     device = next(net.parameters()).device
 
-    params = list(net.parameters())
+    params = [p for p in net.parameters() if p.requires_grad]
     if not grad_already_there:
         grads = torch.autograd.grad(loss, params, create_graph=True)
     else:
@@ -914,7 +918,7 @@ def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size,
 
         # --- Pass 1: A and B ---
         loss = loss_fn(net(X_batch).squeeze(dim=-1), Y_batch)
-        params = list(net.parameters())
+        params = [p for p in net.parameters() if p.requires_grad]
         grads = torch.autograd.grad(loss, params, create_graph=True)
         grads_flat = flatt(grads)
         s_b = optimizer_wrapper.compute_step_direction(grads_flat, params)
@@ -968,7 +972,7 @@ def compute_gbs_probe_batches(net, X, Y, loss_fn, optimizer_wrapper, batch_size,
 
         # --- Pass 2: A_u, B_u (per-batch power iteration) and A_g, B_g (unit gradient) ---
         loss2 = loss_fn(net(X_batch).squeeze(dim=-1), Y_batch)
-        params2 = list(net.parameters())
+        params2 = [p for p in net.parameters() if p.requires_grad]
         grads2 = torch.autograd.grad(loss2, params2, create_graph=True)
         grads2_flat = flatt(grads2)
         g_hat = grads2_flat.detach() / (grads2_flat.detach().norm() + 1e-12)
@@ -1148,7 +1152,7 @@ def compute_grad_gauss_newton_grad(
     """
     normalized_loss_type = _normalize_gauss_newton_loss_type(loss_type)
 
-    params = list(net.parameters())
+    params = [p for p in net.parameters() if p.requires_grad]
     if not params:
         raise ValueError("compute_grad_gauss_newton_grad requires a model with parameters.")
 

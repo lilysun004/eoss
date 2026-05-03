@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Empirical study of the **Edge of Stochastic Stability (EoS)** — training neural nets (mostly an MLP on 8192 CIFAR-10 samples) while tracking the top Hessian eigenvalue, batch sharpness, and projections of the parameter vector onto various dynamics-relevant directions inside a tracking window near EoS.
+Empirical study of the **Edge of Stochastic Stability (EoS)** — training neural nets (MLP/CNN/ViT on 8192 CIFAR-10 samples, plus an `SSTTransformer` on 8192 SST-2 samples for the language extension) while tracking the top Hessian eigenvalue, batch sharpness, and projections of the parameter vector onto various dynamics-relevant directions inside a tracking window near EoS.
 
 ## Running experiments
 
@@ -37,6 +37,10 @@ Array jobs live in `marc_files/sweep_*.sh`, each submitting 5 batch sizes `(8 32
 - `visualization/plot_results.py` — legacy single-run plots.
 
 ## Architecture
+
+### SST-2 transformer (language task)
+
+`SSTTransformer` (`utils/nets.py`) and `prepare_sst2` (`utils/data.py`) are copied verbatim from `marcwalden1/edge-of-stochastic-stability` to reproduce its bimodality figures inside this repo's tracking pipeline. Architecture: 2 bidirectional encoder blocks, d_model=64, n_heads=2, vocab=33278 (bert-base-uncased), seq_len=64, masked mean-pool, zero-init head. **Token embedding is frozen** (`requires_grad=False`) — sparse per-batch gradients to embeddings would invalidate the batch-sharpness estimator. With `use_bert_emb=True` (default), the frozen `tok_emb` is loaded from a precomputed BERT-SVD-projected cache at `/n/holylabs/LABS/kdbrantley_lab/Lab/mwalden/bert_emb_proj64.pt`. Driver: `marc_files/sweep_optimizers/sweep_sst.sh` (10-cell LR sweep at batch=16, SGD-Momentum β=0.5, 200k steps, tracking the final 10k).
 
 ### Training loop (`training.py`)
 

@@ -227,7 +227,7 @@ class MuonOptimizer(OptimizerWrapper):
         self.adam_beta2 = adam_beta2
         self.adam_eps   = adam_eps
 
-        all_params = list(net.parameters())
+        all_params = [p for p in net.parameters() if p.requires_grad]
         self._muon_params = [p for p in all_params if p.ndim >= 2]
         self._adam_params  = [p for p in all_params if p.ndim < 2]
 
