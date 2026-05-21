@@ -37,6 +37,7 @@ from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 
 
 TOP_K = 5
+COS_SIM_BINS = 60  # fixed-edge histogram on [0, 1] for cosine similarity
 
 K_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
 
@@ -117,7 +118,16 @@ def plot_histogram(ax, values, title, bins, show_ylabel=False, color='steelblue'
     if clean.size == 0:
         ax.set_visible(False)
         return
-    ax.hist(clean, bins=bins, color=color, edgecolor='white', linewidth=0.5)
+    try:
+        ax.hist(clean, bins=bins, color=color, edgecolor='white', linewidth=0.5)
+    except ValueError:
+        # Full-batch / deterministic dynamics can collapse a projection to a constant
+        # (or to a range too narrow for `bins` finite-sized bins). Render a delta-spike
+        # at the mean and a sensible xlim so the spike is visible.
+        center = float(clean.mean())
+        ax.axvline(center, color=color, linewidth=3.0)
+        margin = max(float(clean.max() - clean.min()) * 5, abs(center) * 1e-3, 1e-6)
+        ax.set_xlim(center - margin, center + margin)
     ax.set_title(title, fontsize=26)
     if show_ylabel:
         ax.set_ylabel('Count', fontsize=18)
@@ -127,7 +137,7 @@ def plot_histogram(ax, values, title, bins, show_ylabel=False, color='steelblue'
         mean = float(np.nanmean(values))
         std  = float(np.nanstd(values))
         ax.axvline(mean, color='firebrick', linewidth=1.6, linestyle='--')
-        ax.text(0.97, 0.95, f'μ={mean:.3g}\nσ={std:.3g}', transform=ax.transAxes,
+        ax.text(0.97, 0.95, f'μ={mean:.5g}\nσ={std:.3g}', transform=ax.transAxes,
                 ha='right', va='top', fontsize=13, color='#333',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
                           edgecolor='none', alpha=0.75))
@@ -180,11 +190,7 @@ def make_main_png(run_folder, data, out_path, bins, has_precond, run_title):
     track_until = int(data['track_until'])
     n_steps     = len(steps)
 
-    lambda_precond_top1 = None
-    if has_precond and 'lambda_precond_top5' in data:
-        lp = data['lambda_precond_top5']
-        if lp.size > 0:
-            lambda_precond_top1 = lp[:, 0]
+    lambda_precond_top1 = None  # intentionally not overlaid on the main training-dynamics plot
 
     # 5 rows × 5 cols. Row 0 merges training curve (cols 0–1) + 3 basic hists (cols 2–4).
     # Use nested GridSpecs so the top row can have a wider wspace (room for twin-y loss label)
@@ -259,9 +265,23 @@ def make_main_png(run_folder, data, out_path, bins, has_precond, run_title):
                 ax.set_visible(False)
                 continue
             label = r'$|\langle w^{\mathrm{full}}_{%d}(t{-}1),\, w^{\mathrm{full}}_{%d}(t)\rangle|$' % (k + 1, k + 1)
-            plot_histogram(ax, cos[:, k], label, bins,
-                           show_ylabel=(k == 0), color=K_COLORS[k],
-                           show_mean=False)
+            col_clean = cos[:, k][~np.isnan(cos[:, k])]
+            edges = np.linspace(0.0, 1.0, COS_SIM_BINS + 1)
+            clipped = np.clip(col_clean, 0.0, 1.0)
+            ax.hist(clipped, bins=edges, color=K_COLORS[k],
+                    edgecolor='white', linewidth=0.5)
+            ax.set_xlim(0.0, 1.0)
+            ax.set_title(label, fontsize=26)
+            ax.tick_params(labelsize=16)
+            if col_clean.size:
+                mean_k = float(col_clean.mean())
+                std_k = float(col_clean.std())
+                ax.text(0.05, 0.95,
+                        f'μ={mean_k:.6f}\nσ={std_k:.2e}',
+                        transform=ax.transAxes, ha='left', va='top',
+                        fontsize=12, color='#333',
+                        bbox=dict(boxstyle='round,pad=0.3',
+                                  facecolor='white', edgecolor='none', alpha=0.85))
             if k == 0:
                 ax.set_ylabel('Cosine Similarity Counts', fontsize=18)
 
@@ -332,9 +352,20 @@ def make_precond_png(run_folder, data, out_path, bins, run_title):
                 ax.set_visible(False)
                 continue
             label = r'$|\langle \tilde{w}^{\mathrm{full}}_{%d}(t{-}1),\, \tilde{w}^{\mathrm{full}}_{%d}(t)\rangle|$' % (k + 1, k + 1)
-            plot_histogram(ax, cos[:, k], label, bins,
+            plot_histogram(ax, cos[:, k], label, COS_SIM_BINS,
                            show_ylabel=(k == 0), color=K_COLORS[k],
                            show_mean=False)
+            ax.ticklabel_format(useOffset=False, axis='x')
+            col_clean = cos[:, k][~np.isnan(cos[:, k])]
+            if col_clean.size:
+                mean_k = float(col_clean.mean())
+                std_k = float(col_clean.std())
+                ax.text(0.05, 0.95,
+                        f'μ={mean_k:.6f}\nσ={std_k:.2e}',
+                        transform=ax.transAxes, ha='left', va='top',
+                        fontsize=12, color='#333',
+                        bbox=dict(boxstyle='round,pad=0.3',
+                                  facecolor='white', edgecolor='none', alpha=0.85))
             if k == 0:
                 ax.set_ylabel('Cosine Similarity Counts', fontsize=18)
 

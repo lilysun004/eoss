@@ -71,6 +71,8 @@ Per-run artifacts in `$RESULTS/$results_subfolder/<run_folder>/`:
 
 ## Conventions
 
+- `top_k_track` (CLI flag, default 5) controls how many top Hessian eigvecs `ProjectionTracker` maintains per measurement step via warm-started LOBPCG. Larger values increase eigsolve cost per measurement roughly quadratically; saved-array names retain the `_top5` suffix but the second-axis size grows with `top_k_track`. Tracker also writes `proj_cat3` — projection of θ_t onto **m random directions** mutually orthogonal and each orthogonal to the top-K subspace at `track_from`. Used as guaranteed Cat 3 (manifold-tangent) samples for the slow-drift band visualization in `marc_files/drift_results/plot_tangent_drift.py`.
+- `cat3_m` (CLI flag, default 1) sets m. Cost is ~m extra dot products per measurement step (microseconds) plus a one-time Gram-Schmidt at `track_from`. `proj_cat3` is saved as `(n_steps, m)`; legacy 1D arrays from older runs still plot via the back-compat path. Larger m gives the plot script median + IQR/decile shading instead of a single line.
 - New CLI flags: add a variable to `config.py`, thread it through `config.py`'s `train(...)` call, add the param to `train()` in `training.py`, and (if it affects tracking) to `ProjectionTracker.__init__`. The CLI parser picks it up automatically.
 - New projections: extend the `proj_*` lists in `ProjectionTracker`, update `save()`'s key list, then update `PROJECTIONS_BASE` / `PROJECTIONS_PRECOND` in `plot_histograms.py` so histograms render.
 - New optimizer: add to `utils/optimizer.py::create_optimizer`. If it has a diagonal preconditioner, expose `get_preconditioner_inv_sqrt(params) -> Tensor` on the wrapper so the tracker computes preconditioned-Hessian projections automatically.

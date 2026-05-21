@@ -422,6 +422,8 @@ def train(
             track_stride: int = 1,
             lobpcg_max_iters: int = 20,
             lobpcg_reltol: float = 0.02,
+            top_k_track: int = 5,
+            cat3_m: int = 1,
             measurement_batch_size_cap: int | None = None,
             ):
 
@@ -554,11 +556,14 @@ def train(
             track_stride=track_stride,
             lobpcg_max_iters=lobpcg_max_iters,
             lobpcg_reltol=lobpcg_reltol,
+            top_k=top_k_track,
+            cat3_m=cat3_m,
         )
         print(f"Projection tracking enabled for steps {track_from}–{track_until}"
               + (" [fixed_u]" if fixed_u else "")
               + f" [stride={track_stride} save_every={projection_save_every}"
-              + f" lobpcg_max_iters={lobpcg_max_iters} lobpcg_reltol={lobpcg_reltol}]")
+              + f" lobpcg_max_iters={lobpcg_max_iters} lobpcg_reltol={lobpcg_reltol}"
+              + f" top_k={top_k_track} cat3_m={cat3_m}]")
 
     # -------------------------------------
     # Section: Training Step
@@ -701,10 +706,45 @@ def train(
 
             pbar.update(1)
 
-            if step_number > 0 and step_number % 1000 == 0:
+            in_window = (projection_tracker is not None
+                         and track_from <= step_number < track_until)
+
+            if projection_tracker is not None and step_number == track_from:
+                print(f"\n=== Entering tracking window at step {step_number} "
+                      f"(stride={track_stride}, top_k={top_k_track}) ===",
+                      flush=True)
+            if projection_tracker is not None and step_number == track_until:
+                print(f"\n=== Exited tracking window at step {step_number} ===",
+                      flush=True)
+
+            log_interval = track_stride if in_window else 500
+            if step_number > 0 and step_number % log_interval == 0:
                 elapsed = time.time() - start_time
-                print(f"[step {step_number}/{max_steps}] elapsed "
-                      f"{time.strftime('%H:%M:%S', time.gmtime(elapsed))}",
+                tag = "[TRACK] " if in_window else ""
+                def _fmt(v, fmt='.3f'):
+                    if v is None:
+                        return '—'
+                    try:
+                        if isinstance(v, float) and math.isnan(v):
+                            return '—'
+                    except Exception:
+                        pass
+                    return format(v, fmt)
+                lmax_s = _fmt(metrics.get('lmax'), '.2f')
+                bs_s   = _fmt(metrics.get('batch_sharpness'), '.2f')
+                fl_s   = _fmt(metrics.get('full_loss'), '.4f')
+                ratio  = '—'
+                try:
+                    _lr = optimizer.param_groups[0]['lr']
+                    if metrics.get('lmax') is not None and _lr:
+                        ratio = f"{metrics['lmax'] * _lr / 2:.2f}"
+                except Exception:
+                    pass
+                print(f"{tag}[step {step_number}/{max_steps}] "
+                      f"loss={batch_loss:.4f} full_loss={fl_s} "
+                      f"lmax={lmax_s} batch_sharp={bs_s} "
+                      f"lr*lmax/2={ratio} "
+                      f"elapsed={time.strftime('%H:%M:%S', time.gmtime(elapsed))}",
                       flush=True)
 
 

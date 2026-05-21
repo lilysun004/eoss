@@ -16,37 +16,46 @@ from .measure import (
 from utils.nets import CNN, ResNet, WideResNet, WideResNetNoBN
 
 
-TOP_K = 5
+DEFAULT_TOP_K = 5
 
 
 class ProjectionTracker:
     """
-    Tracks the projection of the parameter vector theta_t onto the top-5 eigenvectors
+    Tracks the projection of the parameter vector theta_t onto the top-K eigenvectors
     of various Hessian-like operators at each training step within a user-specified
-    window. Also records top-5 cosine similarity between consecutive tracked steps
-    (alignment of the eigenspace across steps).
+    window. Also records top-K cosine similarity between consecutive tracked steps
+    (alignment of the eigenspace across steps). K is set via the `top_k` constructor
+    arg; saved-array second dimension follows K.
 
-    Quantities (all shaped [n_tracked_steps, 5] unless noted):
+    Quantities (all shaped [n_tracked_steps, K] unless noted):
 
     Always computed:
       - proj_g_full [n]         : ⟨θ_t, E[g_t]⟩ (scalar per step)
       - proj_g      [n]         : ⟨θ_t, g_t⟩ (scalar per step)
       - proj_h      [n]         : ⟨θ_t, Δθ⟩ (scalar per step)
-      - proj_w_top5 [n, 5]      : ⟨θ_t, w_k^full(t)⟩ for k=1..5, per-step full-H eigvecs
-      - proj_wb_top5 [n, 5]     : ⟨θ_t, w_k^batch(t)⟩ for k=1..5, per-step batch-H eigvecs
-      - proj_w_fixed_top5 [n, 5]: ⟨θ_t, w_k^fixed⟩, fixed at the first tracked step
-      - cos_sim_full_top5 [n, 5]: |⟨w_k^full(t-1), w_k^full(t)⟩|; first row all NaN
-      - lambda_top5 [n, 5]      : top-5 eigenvalues of full (subset) Hessian
+      - proj_cat3   [n, m]      : ⟨θ_t, v_star^{(j)}⟩ for j=0..m-1 — each v_star^{(j)}
+                                  is a random unit vector orthogonal to V_{top-K} at
+                                  track_from and to all previous v_star columns.
+                                  All m directions guaranteed Cat 3 (manifold-tangent).
+                                  m = cat3_m constructor arg (default 1).
+      - proj_w_top5 [n, K]      : ⟨θ_t, w_k^full(t)⟩ for k=1..K, per-step full-H eigvecs
+      - proj_wb_top5 [n, K]     : ⟨θ_t, w_k^batch(t)⟩ for k=1..K, per-step batch-H eigvecs
+      - proj_w_fixed_top5 [n, K]: ⟨θ_t, w_k^fixed⟩, fixed at the first tracked step
+      - cos_sim_full_top5 [n, K]: |⟨w_k^full(t-1), w_k^full(t)⟩|; first row all NaN
+      - lambda_top5 [n, K]      : top-K eigenvalues of full (subset) Hessian
 
     Preconditioned quantities (Adam / RMSProp only; NaN otherwise):
-      - proj_w_precond_top5      [n, 5]
-      - proj_wb_precond_top5     [n, 5]
-      - proj_w_precond_fixed_top5[n, 5]
-      - cos_sim_precond_top5     [n, 5]
-      - lambda_precond_top5      [n, 5]
+      - proj_w_precond_top5      [n, K]
+      - proj_wb_precond_top5     [n, K]
+      - proj_w_precond_fixed_top5[n, K]
+      - cos_sim_precond_top5     [n, K]
+      - lambda_precond_top5      [n, K]
+
+    Saved-array names retain the `_top5` suffix for backward compatibility with
+    existing plot/analysis scripts; the second axis size follows `top_k`.
 
     The `fixed_u` constructor flag is retained for CLI backward compatibility but is
-    now a no-op — fixed top-5 eigenvectors are always captured at the first tracked
+    now a no-op — fixed top-K eigenvectors are always captured at the first tracked
     step.
 
     Usage in training loop:
@@ -58,7 +67,8 @@ class ProjectionTracker:
     def __init__(self, net, X, Y, loss_fn, track_from, track_until,
                  save_dir, device, optimizer_wrapper=None, fixed_u: bool = False,
                  save_every: int = 100, track_stride: int = 1,
-                 lobpcg_max_iters: int = 20, lobpcg_reltol: float = 0.02):
+                 lobpcg_max_iters: int = 20, lobpcg_reltol: float = 0.02,
+                 top_k: int = DEFAULT_TOP_K, cat3_m: int = 1):
         self.net = net
         self.X = X
         self.Y = Y
@@ -82,6 +92,8 @@ class ProjectionTracker:
         self._track_stride = max(1, int(track_stride))
         self._lobpcg_max_iters = int(lobpcg_max_iters)
         self._lobpcg_reltol = float(lobpcg_reltol)
+        self._top_k = int(top_k)
+        self._cat3_m = max(1, int(cat3_m))
         # Log once per run when the batch-H path is elided (batch_size >= dataset).
         self._batch_h_skip_logged = False
 
@@ -93,11 +105,18 @@ class ProjectionTracker:
         self._prev_w_top5_full:    torch.Tensor | None = None
         self._prev_w_top5_precond: torch.Tensor | None = None
 
-        # Warm-start eigenvector caches (top-5 each).
-        self._eigvec_cache_full          = EigenvectorCache(max_eigenvectors=TOP_K)
-        self._eigvec_cache_batch         = EigenvectorCache(max_eigenvectors=TOP_K)
-        self._eigvec_cache_precond_full  = EigenvectorCache(max_eigenvectors=TOP_K)
-        self._eigvec_cache_precond_batch = EigenvectorCache(max_eigenvectors=TOP_K)
+        # Warm-start eigenvector caches (top-K each).
+        self._eigvec_cache_full          = EigenvectorCache(max_eigenvectors=self._top_k)
+        self._eigvec_cache_batch         = EigenvectorCache(max_eigenvectors=self._top_k)
+        self._eigvec_cache_precond_full  = EigenvectorCache(max_eigenvectors=self._top_k)
+        self._eigvec_cache_precond_batch = EigenvectorCache(max_eigenvectors=self._top_k)
+
+        # Guaranteed Cat 3 directions: m random unit vectors, each orthogonal
+        # to the fixed top-K eigenvectors at first tracked step AND mutually
+        # orthogonal. Built lazily in pre_step once self._fixed_top5_full is
+        # populated. Each column lies in V_{top-K}^⊥ at track_from, sampling
+        # the zero-eigenvalue (manifold-tangent) subspace. Shape [n_params, m].
+        self._cat3_v_stars: torch.Tensor | None = None
 
         # Fixed full-Hessian subset (drawn once, then reused across tracked steps so
         # warm-started LOBPCG actually benefits from step-to-step Hessian similarity).
@@ -105,11 +124,12 @@ class ProjectionTracker:
         self._fixed_subset_Y: torch.Tensor | None = None
 
         # Per-tracked-step storage. Scalar lists for the simple quantities; lists of
-        # length-5 arrays for the top-5 quantities (stacked to 2D on save()).
+        # length-top_k arrays for the top-K quantities (stacked to 2D on save()).
         self._steps:                       list[int]       = []
         self._proj_g_full:                 list[float]     = []
         self._proj_g:                      list[float]     = []
         self._proj_h:                      list[float]     = []
+        self._proj_cat3:                   list[np.ndarray] = []  # ⟨θ_t, v_star^{(j)}⟩ for j=0..m-1
         self._proj_w_top5:                 list[np.ndarray] = []
         self._proj_wb_top5:                list[np.ndarray] = []
         self._proj_w_fixed_top5:           list[np.ndarray] = []
@@ -190,7 +210,7 @@ class ProjectionTracker:
             reltol = self._lobpcg_reltol
         eigvals, eigvecs = compute_eigenvalues(
             loss, self.net,
-            k=TOP_K,
+            k=self._top_k,
             max_iterations=max_iters,
             reltol=reltol,
             eigenvector_cache=cache,
@@ -231,7 +251,7 @@ class ProjectionTracker:
             eigvals, eigvecs = _run_lobpcg_with_operator(
                 precond_operator,
                 self.net,
-                k=TOP_K,
+                k=self._top_k,
                 max_iterations=max_iters,
                 reltol=reltol,
                 init_vectors=None,
@@ -273,17 +293,34 @@ class ProjectionTracker:
             loss_sub, self._eigvec_cache_full, grads=grads_sub,
         )  # [5], [n_params, 5]
 
-        # Capture fixed full-Hessian top-5 at the first tracked step (always).
+        # Capture fixed full-Hessian top-K at the first tracked step (always).
         if self._fixed_top5_full is None:
             self._fixed_top5_full = w_top5.clone()
+            # Build m guaranteed Cat 3 directions once. For each j in 0..m-1:
+            # draw a random vector, project out the top-K subspace and the
+            # previously drawn v_star^{(<j)} columns, normalize. Result columns
+            # are mutually orthonormal AND orthogonal to V_{top-K} at
+            # track_from → all in the zero-eigenvalue (manifold-tangent) subspace.
+            v_stars = torch.empty(
+                theta_t.numel(), self._cat3_m,
+                device=theta_t.device, dtype=theta_t.dtype,
+            )
+            for j in range(self._cat3_m):
+                r = torch.randn_like(theta_t)
+                r = r - self._fixed_top5_full @ (self._fixed_top5_full.T @ r)
+                if j > 0:
+                    Vj = v_stars[:, :j]
+                    r = r - Vj @ (Vj.T @ r)
+                v_stars[:, j] = r / r.norm()
+            self._cat3_v_stars = v_stars.detach().clone()
 
-        # Cosine similarity with previous tracked step's top-5 (|·| absorbs ±sign).
+        # Cosine similarity with previous tracked step's top-K (|·| absorbs ±sign).
         if self._prev_w_top5_full is None:
-            cos_full = np.full(TOP_K, np.nan, dtype=np.float32)
+            cos_full = np.full(self._top_k, np.nan, dtype=np.float32)
         else:
             cos_full = np.array([
                 abs(torch.dot(self._prev_w_top5_full[:, k], w_top5[:, k])).item()
-                for k in range(TOP_K)
+                for k in range(self._top_k)
             ], dtype=np.float32)
         self._prev_w_top5_full = w_top5.clone()
 
@@ -305,11 +342,11 @@ class ProjectionTracker:
                 loss_b = self.loss_fn(preds_b, Y_batch)
             _, wb_top5 = self._top5_eigenvectors(loss_b, self._eigvec_cache_batch)
 
-        # 5. Preconditioned top-5 (Adam / RMSProp only)
+        # 5. Preconditioned top-K (Adam / RMSProp only)
         w_precond_top5 = None
         wb_precond_top5 = None
-        lam_precond_top5 = np.full(TOP_K, np.nan, dtype=np.float32)
-        cos_precond = np.full(TOP_K, np.nan, dtype=np.float32)
+        lam_precond_top5 = np.full(self._top_k, np.nan, dtype=np.float32)
+        cos_precond = np.full(self._top_k, np.nan, dtype=np.float32)
 
         if self._has_preconditioner:
             D_inv_sqrt = self._optimizer_wrapper.get_preconditioner_inv_sqrt()
@@ -326,14 +363,14 @@ class ProjectionTracker:
                     self._fixed_top5_precond = w_precond_top5.clone()
 
                 if self._prev_w_top5_precond is None:
-                    cos_precond = np.full(TOP_K, np.nan, dtype=np.float32)
+                    cos_precond = np.full(self._top_k, np.nan, dtype=np.float32)
                 else:
                     cos_precond = np.array([
                         abs(torch.dot(
                             self._prev_w_top5_precond[:, k],
                             w_precond_top5[:, k]
                         )).item()
-                        for k in range(TOP_K)
+                        for k in range(self._top_k)
                     ], dtype=np.float32)
                 self._prev_w_top5_precond = w_precond_top5.clone()
 
@@ -375,11 +412,11 @@ class ProjectionTracker:
         dot = torch.dot
 
         def _projections(theta, W):
-            # W: [n_params, 5] → return np array [5] of ⟨theta, W[:, k]⟩
+            # W: [n_params, top_k] → return np array [top_k] of ⟨theta, W[:, k]⟩
             if W is None:
-                return np.full(TOP_K, np.nan, dtype=np.float32)
+                return np.full(self._top_k, np.nan, dtype=np.float32)
             return np.array(
-                [dot(theta, W[:, k]).item() for k in range(TOP_K)],
+                [dot(theta, W[:, k]).item() for k in range(self._top_k)],
                 dtype=np.float32,
             )
 
@@ -387,6 +424,13 @@ class ProjectionTracker:
         self._proj_g_full.append(dot(theta_t, self._pending_g_full).item())
         self._proj_g.append(dot(theta_t, self._pending_g_t).item())
         self._proj_h.append(dot(theta_t, h_t).item())
+        # Cat 3 guaranteed-tangent projections (v_stars fixed at first tracked step).
+        # ⟨θ_t, v_star^{(j)}⟩ for each of the m directions → length-m array.
+        if self._cat3_v_stars is not None:
+            cat3_proj = (theta_t @ self._cat3_v_stars).detach().cpu().numpy().astype(np.float32)
+        else:
+            cat3_proj = np.full(self._cat3_m, np.nan, dtype=np.float32)
+        self._proj_cat3.append(cat3_proj)
 
         self._proj_w_top5.append(_projections(theta_t, self._pending_w_top5))
         self._proj_wb_top5.append(_projections(theta_t, self._pending_wb_top5))
@@ -438,6 +482,7 @@ class ProjectionTracker:
             proj_g_full=np.array(self._proj_g_full, dtype=np.float32),
             proj_g=np.array(self._proj_g, dtype=np.float32),
             proj_h=np.array(self._proj_h, dtype=np.float32),
+            proj_cat3=stack(self._proj_cat3),
             proj_w_top5=stack(self._proj_w_top5),
             proj_wb_top5=stack(self._proj_wb_top5),
             proj_w_fixed_top5=stack(self._proj_w_fixed_top5),
@@ -448,6 +493,7 @@ class ProjectionTracker:
             proj_w_precond_fixed_top5=stack(self._proj_w_precond_fixed_top5),
             cos_sim_precond_top5=stack(self._cos_sim_precond_top5),
             lambda_precond_top5=stack(self._lambda_precond_top5),
+            top_k=np.int64(self._top_k),
             track_from=np.int64(self.track_from),
             track_until=np.int64(self.track_until),
         )

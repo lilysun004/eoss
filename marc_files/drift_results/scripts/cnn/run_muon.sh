@@ -1,0 +1,26 @@
+#!/bin/bash
+#SBATCH -J td_muon
+#SBATCH -p kempner_requeue
+#SBATCH -A kempner_kdbrantley_lab
+#SBATCH -c 16
+#SBATCH --gres=gpu:1
+#SBATCH --mem=16G
+#SBATCH -t 06:00:00
+#SBATCH -o /n/home06/mwalden/eoss/marc_files/logs/td_muon_%j.out
+#SBATCH -e /n/home06/mwalden/eoss/marc_files/logs/td_muon_%j.err
+
+source ~/.bashrc
+conda activate eoss || true
+
+export DATASETS=/n/holylabs/LABS/kdbrantley_lab/Lab/mwalden/datasets
+export RESULTS=/n/holylabs/LABS/kdbrantley_lab/Lab/mwalden/results
+
+cd /n/home06/mwalden/eoss
+
+/n/home06/mwalden/.conda/envs/eoss/bin/python config.py \
+    --model cnn --dataset cifar10 --num_data 16384 \
+    --optimizer_name Muon --lr 0.001 --batch_size 128 \
+    --optimizer_params "{'momentum': 0.9}" \
+    --steps 75000 --track_from 70000 --track_until 75000 \
+    --track_stride 10 --top_k_track 30 --fixed_u True \
+    --results_subfolder tangent_drift_cnn_optsweep

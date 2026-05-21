@@ -96,8 +96,10 @@ track_until         = 30000    # step to stop recording projections (None = disa
 fixed_u             = False    # True = fix top Hessian eigenvec at track_from and reuse
 projection_save_every = 100    # flush projections.npz every N tracked steps (0 = only at end)
 track_stride        = 10       # record every Nth step within [track_from, track_until]
-lobpcg_max_iters    = 20       # LOBPCG inner-loop cap for projection tracker top-5
-lobpcg_reltol       = 0.02     # LOBPCG convergence tolerance for projection tracker top-5
+lobpcg_max_iters    = 20       # LOBPCG inner-loop cap for projection tracker top-K
+lobpcg_reltol       = 0.02     # LOBPCG convergence tolerance for projection tracker top-K
+top_k_track         = 5        # number of top Hessian eigvecs the projection tracker maintains per step
+cat3_m              = 1        # number of random Cat 3 (tangent) directions to track in projection tracker
 
 # --- Measurement frequency ---
 more_freq_measure   = False    # True = halve all measurement intervals
@@ -261,5 +263,7 @@ if __name__ == '__main__':
         track_stride=track_stride,
         lobpcg_max_iters=lobpcg_max_iters,
         lobpcg_reltol=lobpcg_reltol,
+        top_k_track=top_k_track,
+        cat3_m=cat3_m,
         measurement_batch_size_cap=measurement_batch_size_cap,
     )
