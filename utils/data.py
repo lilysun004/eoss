@@ -89,7 +89,11 @@ def get_dataset_presets():
             'sst2': {
                 'input_dim': 64,    # seq_len; consumed only by sst_transformer
                 'output_dim': 1     # binary, single logit
-            }
+            },
+            'qwen_sst2': {
+                'input_dim': 64,    # seq_len; not consumed by qwen_classifier
+                'output_dim': 2     # binary CE: 2 logits
+            },
 
         }
 
@@ -582,8 +586,43 @@ def prepare_sst2(dataset_folder: Path, num_data: int, seq_len: int = 64, dataset
     return X, Y, None, None
 
 
+def prepare_qwen_sst2(dataset_folder: Path, num_data: int, seq_len: int = 64,
+                      dataset_seed: int = 0, tokenizer_path: str = None):
+    """Load SST-2 for Qwen-based classifiers.
+
+    Tokenizes with Qwen's tokenizer (large vocab, EOS as PAD). Labels are
+    int64 {0, 1} — compatible with CrossEntropyLoss. Class-balanced sample
+    of num_data total (num_data//2 per class), same seeding as prepare_sst2.
+    """
+    import os
+    os.environ["TOKENIZERS_PARALLELISM"] = "False"
+    from datasets import load_dataset
+    from transformers import AutoTokenizer
+
+    if tokenizer_path is None:
+        tokenizer_path = "Qwen/Qwen2.5-0.5B-Instruct"
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    dataset = load_dataset("glue", "sst2")
+    y = np.array(dataset["train"]["label"])
+    n_per_class = num_data // 2
+    neg_idx = np.argwhere(y == 0)[:n_per_class, 0]
+    pos_idx = np.argwhere(y == 1)[:n_per_class, 0]
+    idx = np.concatenate([neg_idx, pos_idx])
+    labels = y[idx]  # {0, 1} — kept as-is for CE loss
+    sentences = [dataset["train"][int(i)]["sentence"] for i in idx]
+    input_ids = tokenizer(
+        sentences, padding='max_length', truncation=True, max_length=seq_len
+    )["input_ids"]
+    X = torch.tensor(input_ids, dtype=torch.long)
+    Y = torch.tensor(labels, dtype=torch.long)
+    return X, Y, None, None
+
+
 def prepare_dataset(dataset: str, dataset_folder: Union[str, Path], num_data: int, classes: list, dataset_seed: int = 888,
-                    loss_type: str = 'mse'
+                    loss_type: str = 'mse', tokenizer_path: str = None
                     ):
     dataset_folder = Path(dataset_folder)
     train_size = num_data
@@ -605,4 +644,7 @@ def prepare_dataset(dataset: str, dataset_folder: Union[str, Path], num_data: in
         return prepare_imagenet32(dataset_folder, num_data, dataset_seed=dataset_seed, loss_type=loss_type)
     if dataset == 'sst2':
         return prepare_sst2(dataset_folder, num_data, seq_len=64, dataset_seed=dataset_seed)
-    
+    if dataset == 'qwen_sst2':
+        return prepare_qwen_sst2(dataset_folder, num_data, seq_len=64,
+                                 dataset_seed=dataset_seed, tokenizer_path=tokenizer_path)
+

@@ -13,6 +13,11 @@ from .measure import (
     _run_lobpcg_with_operator,
     param_length,
 )
+from .curvature_segment import (
+    compute_curvature_segment,
+    compute_curvature_along_u,
+    set_params_inplace,
+)
 from utils.nets import CNN, ResNet, WideResNet, WideResNetNoBN
 
 
@@ -68,7 +73,9 @@ class ProjectionTracker:
                  save_dir, device, optimizer_wrapper=None, fixed_u: bool = False,
                  save_every: int = 100, track_stride: int = 1,
                  lobpcg_max_iters: int = 20, lobpcg_reltol: float = 0.02,
-                 top_k: int = DEFAULT_TOP_K, cat3_m: int = 1):
+                 top_k: int = DEFAULT_TOP_K, cat3_m: int = 1,
+                 curv_n_alphas: int = 0, curv_n_betas: int = 0,
+                 curv_beta_scale: float = 2.0, curv_every: int = 50):
         self.net = net
         self.X = X
         self.Y = Y
@@ -154,6 +161,42 @@ class ProjectionTracker:
         self._pending_cos_precond:       np.ndarray | None = None
         self._pending_lambda_top5:       np.ndarray | None = None
         self._pending_lambda_precond_top5: np.ndarray | None = None
+
+        # ------------------------------------------------------------------
+        # Curvature failure-mode scan (Cohen et al. central flows, p.89 / Fig 29).
+        # When enabled, every `curv_every` tracked steps we scan:
+        #   (a) u_mid^T H(α w_t + (1-α) w_{t+1}) u_mid along the segment in α
+        #   (b) u_t^T H(w_t + β u_t) u_t along the top eigvec direction in β
+        # Both reuse the existing fixed subset (X_sub, Y_sub). u_mid is computed
+        # with one extra LOBPCG warm-started from u_t. Disabled when
+        # curv_n_alphas == 0 (default).
+        # ------------------------------------------------------------------
+        self._curv_n_alphas    = int(curv_n_alphas)
+        self._curv_n_betas     = int(curv_n_betas)
+        self._curv_beta_scale  = float(curv_beta_scale)
+        self._curv_every       = max(1, int(curv_every))
+
+        # α grid: 11 uniform points on [0,1] + 2 fine FD points near α=0.5
+        # for accurate post-hoc Taylor slope/curvature estimation. Set lazily
+        # only when n_alphas > 0; uses exactly len = max(n_alphas, 13) points.
+        self._curv_alphas: np.ndarray | None = None
+
+        self._curv_steps:            list[int]       = []
+        self._curv_segment:          list[np.ndarray] = []  # [n_alphas] per step
+        self._curv_along_u:          list[np.ndarray] = []  # [n_betas] per step
+        self._curv_betas:            list[np.ndarray] = []  # per-step β grid
+        # Stochastic Fig-29: scan along the realized step (batch-gradient) direction.
+        # At EoSS the instability lives along the per-batch gradient, not the
+        # full-batch top eigvec — λ_max can be ≪ batch_sharpness. For plain SGD the
+        # step h_t = -η·g_batch, so ĥ = h_t/‖h_t‖ is the (unit) batch-gradient dir.
+        self._curv_along_step:       list[np.ndarray] = []  # [n_betas] per step
+        self._curv_betas_step:       list[np.ndarray] = []  # per-step β grid (× ‖h_t‖)
+        self._curv_uHu_step:         list[float]     = []  # ĥ^T H(w_t) ĥ (β=0)
+        self._curv_lambda_mid:       list[float]     = []
+        self._curv_lambda_w_t:       list[float]     = []
+        self._curv_step_norm:        list[float]     = []
+        self._curv_step_proj_u_mid:  list[float]     = []
+        self._curv_step_proj_u_t:    list[float]     = []
 
     def should_track(self, step: int) -> bool:
         if not (self.track_from <= step <= self.track_until):
@@ -398,6 +441,12 @@ class ProjectionTracker:
         self._pending_cos_precond          = cos_precond
         self._pending_lambda_top5          = lam_top5.cpu().numpy().astype(np.float32)
         self._pending_lambda_precond_top5  = lam_precond_top5
+        # Stash the minibatch for the along-step (batch-sharpness) curvature scan:
+        # the EoSS instability is in the per-batch Hessian H_B, not the full Hessian,
+        # so that scan must use the actual batch B that produced the step.
+        if self._curv_n_betas > 0:
+            self._pending_X_batch = X_batch.detach().clone()
+            self._pending_Y_batch = Y_batch.detach().clone()
 
         return theta_t
 
@@ -444,6 +493,16 @@ class ProjectionTracker:
         self._cos_sim_precond_top5.append(self._pending_cos_precond)
         self._lambda_precond_top5.append(self._pending_lambda_precond_top5)
 
+        # Curvature failure-mode scan (Cohen et al. p.89 / Fig 29).
+        # Read u_t and λ_t from pending state BEFORE we clear it below.
+        if (self._curv_n_alphas > 0
+                and (step % self._curv_every == 0)
+                and self._pending_w_top5 is not None
+                and self._pending_lambda_top5 is not None):
+            u_t = self._pending_w_top5[:, 0].detach().clone()
+            lam_wt = float(self._pending_lambda_top5[0])
+            self._do_curvature_scan(step, theta_before, theta_after, u_t, lam_wt)
+
         # Clear stash
         self._pending_step = None
         self._pending_theta_t = None
@@ -460,6 +519,133 @@ class ProjectionTracker:
 
         if self._save_every and len(self._steps) % self._save_every == 0:
             self.save()
+
+    # ------------------------------------------------------------------ #
+    #  Curvature failure-mode scan                                         #
+    # ------------------------------------------------------------------ #
+
+    def _do_curvature_scan(self, step: int, theta_before: torch.Tensor,
+                           theta_after: torch.Tensor, u_t: torch.Tensor,
+                           lam_wt: float) -> None:
+        """Scan u^T H(w) u along (a) the segment {α w_t + (1-α) w_{t+1}} with
+        u = top eigvec at midpoint, and (b) along u_t at w_t.
+
+        Invariants enforced:
+          - net.parameters() restored to theta_after before returning (try/finally).
+          - Same fixed subset (X_sub, Y_sub) used for u_mid LOBPCG and ALL scan HVPs.
+          - u_mid LOBPCG passes u_t as init_vectors, NOT the per-step cache —
+            we must not corrupt the cache the next pre_step warm-starts from.
+        """
+        if self._curv_alphas is None:
+            # 11 uniform on [0, 1] + 2 fine FD points at α=0.5 ± 0.02 for
+            # post-hoc Taylor slope/curvature estimation. Final length = 13.
+            self._curv_alphas = np.concatenate([
+                np.linspace(0.0, 1.0, 11, dtype=np.float64),
+                np.array([0.48, 0.52], dtype=np.float64),
+            ])
+
+        X_sub, Y_sub = self._get_subset()
+        h_t = theta_after - theta_before
+        w_mid = 0.5 * (theta_before + theta_after)
+
+        try:
+            # ---- (1) Top eigvec at midpoint, warm-started from u_t ----
+            set_params_inplace(self.net, w_mid)
+            with torch.enable_grad():
+                preds_mid = self.net(X_sub).squeeze(dim=-1)
+                loss_mid = self.loss_fn(preds_mid, Y_sub)
+            lambda_mid_t, u_mid = compute_eigenvalues(
+                loss_mid, self.net,
+                k=1,
+                max_iterations=self._lobpcg_max_iters,
+                reltol=self._lobpcg_reltol,
+                init_vectors=u_t.unsqueeze(1),
+                eigenvector_cache=None,   # do NOT touch the per-step cache
+                return_eigenvectors=True,
+                use_power_iteration=False,
+            )
+            lambda_mid = float(lambda_mid_t)
+            u_mid = u_mid.detach().clone()
+            # restore before the scans so each scan starts from a known state
+            set_params_inplace(self.net, theta_after)
+
+            # ---- (2) Segment scan (a) ----
+            curv_seg = compute_curvature_segment(
+                self.net, self.loss_fn, X_sub, Y_sub,
+                theta_before, theta_after, u_mid, self._curv_alphas,
+            )
+
+            # ---- (3) Along-u scan (b) ----
+            if self._curv_n_betas > 0:
+                delta_t = torch.dot(h_t, u_t).item()
+                scale = max(abs(delta_t), 1e-12)
+                betas = np.linspace(
+                    -self._curv_beta_scale, self._curv_beta_scale,
+                    self._curv_n_betas, dtype=np.float64,
+                ) * scale
+                curv_u = compute_curvature_along_u(
+                    self.net, self.loss_fn, X_sub, Y_sub,
+                    theta_before, u_t, betas,
+                )
+            else:
+                betas = np.full(0, np.nan, dtype=np.float64)
+                curv_u = np.full(0, np.nan, dtype=np.float32)
+
+            # ---- (3b) Along-step scan (stochastic Fig-29) ----
+            # Scan ĥ^T H_B(w_t + β ĥ) ĥ along the unit step direction ĥ = h_t/‖h_t‖,
+            # using the per-batch Hessian H_B of the batch B that produced the step.
+            # For plain SGD ĥ = -g_B/‖g_B‖, so the β=0 value is the (single-batch)
+            # batch sharpness g_B^T H_B g_B/‖g_B‖² — the EoSS order parameter. Scanning
+            # β asks whether that curvature is non-quadratic along the step (the
+            # stochastic analog of Fig 29). Full Hessian is useless here: ĥ^T H ĥ ≤ λ_max
+            # for any ĥ, so it can't see batch sharpness ≫ λ_max.
+            X_b = getattr(self, '_pending_X_batch', None)
+            Y_b = getattr(self, '_pending_Y_batch', None)
+            if self._curv_n_betas > 0 and X_b is not None:
+                step_len = float(torch.norm(h_t).item())
+                if step_len > 1e-12:
+                    h_hat = h_t / step_len
+                    betas_step = np.linspace(
+                        -self._curv_beta_scale, self._curv_beta_scale,
+                        self._curv_n_betas, dtype=np.float64,
+                    ) * step_len
+                    curv_step = compute_curvature_along_u(
+                        self.net, self.loss_fn, X_b, Y_b,
+                        theta_before, h_hat, betas_step,
+                    )
+                    # β=0 value = ĥ^T H(w_t) ĥ (directional curvature along the step)
+                    i_zero = int(np.argmin(np.abs(betas_step)))
+                    uHu_step = float(curv_step[i_zero])
+                else:
+                    betas_step = np.full(self._curv_n_betas, np.nan, dtype=np.float64)
+                    curv_step = np.full(self._curv_n_betas, np.nan, dtype=np.float32)
+                    uHu_step = float('nan')
+            else:
+                betas_step = np.full(0, np.nan, dtype=np.float64)
+                curv_step = np.full(0, np.nan, dtype=np.float32)
+                uHu_step = float('nan')
+
+            # ---- (4) Diagnostic scalars ----
+            step_norm = float(torch.norm(h_t).item())
+            step_proj_u_mid = float(torch.dot(h_t, u_mid).item())
+            step_proj_u_t = float(torch.dot(h_t, u_t).item())
+
+            # ---- (5) Append to storage ----
+            self._curv_steps.append(int(step))
+            self._curv_segment.append(curv_seg.astype(np.float32))
+            self._curv_along_u.append(curv_u.astype(np.float32))
+            self._curv_betas.append(betas.astype(np.float32))
+            self._curv_along_step.append(curv_step.astype(np.float32))
+            self._curv_betas_step.append(betas_step.astype(np.float32))
+            self._curv_uHu_step.append(uHu_step)
+            self._curv_lambda_mid.append(lambda_mid)
+            self._curv_lambda_w_t.append(lam_wt)
+            self._curv_step_norm.append(step_norm)
+            self._curv_step_proj_u_mid.append(step_proj_u_mid)
+            self._curv_step_proj_u_t.append(step_proj_u_t)
+        finally:
+            # Belt-and-braces: ensure net is restored to θ_{t+1} no matter what.
+            set_params_inplace(self.net, theta_after)
 
     def save(self):
         """Save all recorded projections to projections.npz in save_dir."""
@@ -499,3 +685,40 @@ class ProjectionTracker:
         )
         tmp_path.replace(out_path)
         print(f"ProjectionTracker: saved {len(self._steps)} steps to {out_path}")
+
+        # Curvature failure-mode scan (separate file).
+        if self._curv_steps:
+            curv_out = self.save_dir / 'curvature_segment.npz'
+            curv_tmp = self.save_dir / 'curvature_segment.tmp.npz'
+            np.savez(
+                curv_tmp,
+                steps=np.array(self._curv_steps, dtype=np.int64),
+                alphas=(self._curv_alphas
+                        if self._curv_alphas is not None
+                        else np.zeros(0, dtype=np.float64)),
+                curv_segment=np.stack(self._curv_segment, axis=0).astype(np.float32),
+                curv_along_u=(np.stack(self._curv_along_u, axis=0).astype(np.float32)
+                              if (self._curv_n_betas > 0 and self._curv_along_u)
+                              else np.zeros((len(self._curv_steps), 0), dtype=np.float32)),
+                betas=(np.stack(self._curv_betas, axis=0).astype(np.float32)
+                       if (self._curv_n_betas > 0 and self._curv_betas)
+                       else np.zeros((len(self._curv_steps), 0), dtype=np.float32)),
+                curv_along_step=(np.stack(self._curv_along_step, axis=0).astype(np.float32)
+                                 if (self._curv_n_betas > 0 and self._curv_along_step)
+                                 else np.zeros((len(self._curv_steps), 0), dtype=np.float32)),
+                betas_step=(np.stack(self._curv_betas_step, axis=0).astype(np.float32)
+                            if (self._curv_n_betas > 0 and self._curv_betas_step)
+                            else np.zeros((len(self._curv_steps), 0), dtype=np.float32)),
+                uHu_step=np.array(self._curv_uHu_step, dtype=np.float32),
+                lambda_mid=np.array(self._curv_lambda_mid, dtype=np.float32),
+                lambda_w_t=np.array(self._curv_lambda_w_t, dtype=np.float32),
+                step_norm=np.array(self._curv_step_norm, dtype=np.float32),
+                step_proj_u_mid=np.array(self._curv_step_proj_u_mid, dtype=np.float32),
+                step_proj_u_t=np.array(self._curv_step_proj_u_t, dtype=np.float32),
+                curv_every=np.int64(self._curv_every),
+                curv_beta_scale=np.float32(self._curv_beta_scale),
+                track_from=np.int64(self.track_from),
+                track_until=np.int64(self.track_until),
+            )
+            curv_tmp.replace(curv_out)
+            print(f"ProjectionTracker: saved {len(self._curv_steps)} curvature scans to {curv_out}")

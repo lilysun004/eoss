@@ -67,7 +67,9 @@ def plot_training_curve(ax, run_folder: Path, track_from: int, track_until: int,
                         lambda_top1_precond=None, steps_precond=None):
     """lmax (blue), batch_sharpness (green), loss (grey right axis).
     Optionally overlay λ_max(D^{-1/2}HD^{-1/2}) in the tracking window (k=1 column)."""
-    results_path = run_folder / 'results.txt'
+    results_path = run_folder / 'data' / 'results.txt'
+    if not results_path.exists():
+        results_path = run_folder / 'results.txt'
     if not results_path.exists():
         ax.set_title('No results.txt', fontsize=15)
         return
@@ -383,10 +385,11 @@ def main():
     args = parser.parse_args()
 
     run_folder = Path(args.run_folder)
-    npz_path = run_folder / 'projections.npz'
-
+    npz_path = run_folder / 'data' / 'projections.npz'
     if not npz_path.exists():
-        print(f"Error: {npz_path} not found.", file=sys.stderr)
+        npz_path = run_folder / 'projections.npz'
+    if not npz_path.exists():
+        print(f"Error: projections.npz not found in {run_folder} or {run_folder/'data'}.", file=sys.stderr)
         sys.exit(1)
 
     data = np.load(npz_path)
@@ -402,8 +405,8 @@ def main():
         precond_out = main_out.with_name(main_out.stem + '_precond' + main_out.suffix)
     else:
         safe_title = run_title.replace(' ', '_').replace('=', '').replace('/', '-')
-        main_out = run_folder / f'histograms_{safe_title}.pdf'
-        precond_out = run_folder / f'histograms_{safe_title}_precond.pdf'
+        main_out = run_folder / f'histograms_{safe_title}.png'
+        precond_out = run_folder / f'histograms_{safe_title}_precond.png'
 
     make_main_png(run_folder, data, main_out, args.bins, has_precond, run_title)
 

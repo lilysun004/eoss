@@ -331,7 +331,9 @@ def _plot_drift_band(ax, steps, proj_2d_frozen, k_label, color='#2ca02c',
 
 
 def plot_training_curve(ax, run_folder: Path, track_from: int, track_until: int):
-    results_path = run_folder / 'results.txt'
+    results_path = run_folder / 'data' / 'results.txt'
+    if not results_path.exists():
+        results_path = run_folder / 'results.txt'
     if not results_path.exists():
         ax.set_title('No results.txt', fontsize=13)
         return
@@ -397,9 +399,11 @@ def main():
     args = parser.parse_args()
 
     run_folder: Path = args.run_folder
-    npz_path = run_folder / 'projections.npz'
+    npz_path = run_folder / 'data' / 'projections.npz'
     if not npz_path.exists():
-        raise SystemExit(f"No projections.npz in {run_folder}")
+        npz_path = run_folder / 'projections.npz'
+    if not npz_path.exists():
+        raise SystemExit(f"No projections.npz in {run_folder} or {run_folder/'data'}")
     data = np.load(npz_path)
 
     steps        = data['steps']
@@ -493,12 +497,9 @@ def main():
     fig.suptitle(f'Tangent drift / Cv  —  {title}', fontsize=16, y=0.998)
 
     out_png = args.out if args.out else run_folder / f'tangent_drift_{run_folder.name}.png'
-    out_pdf = out_png.with_suffix('.pdf')
     fig.savefig(out_png, dpi=110, bbox_inches='tight')
-    fig.savefig(out_pdf, bbox_inches='tight')
     plt.close(fig)
     print(f"Wrote {out_png}")
-    print(f"Wrote {out_pdf}")
 
 
 if __name__ == '__main__':

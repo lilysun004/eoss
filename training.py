@@ -424,6 +424,10 @@ def train(
             lobpcg_reltol: float = 0.02,
             top_k_track: int = 5,
             cat3_m: int = 1,
+            curv_n_alphas: int = 0,
+            curv_n_betas: int = 0,
+            curv_beta_scale: float = 2.0,
+            curv_every: int = 50,
             measurement_batch_size_cap: int | None = None,
             ):
 
@@ -558,12 +562,18 @@ def train(
             lobpcg_reltol=lobpcg_reltol,
             top_k=top_k_track,
             cat3_m=cat3_m,
+            curv_n_alphas=curv_n_alphas,
+            curv_n_betas=curv_n_betas,
+            curv_beta_scale=curv_beta_scale,
+            curv_every=curv_every,
         )
+        curv_tag = (f" curv_n_alphas={curv_n_alphas} curv_n_betas={curv_n_betas}"
+                    f" curv_every={curv_every}") if curv_n_alphas > 0 else ""
         print(f"Projection tracking enabled for steps {track_from}–{track_until}"
               + (" [fixed_u]" if fixed_u else "")
               + f" [stride={track_stride} save_every={projection_save_every}"
               + f" lobpcg_max_iters={lobpcg_max_iters} lobpcg_reltol={lobpcg_reltol}"
-              + f" top_k={top_k_track} cat3_m={cat3_m}]")
+              + f" top_k={top_k_track} cat3_m={cat3_m}{curv_tag}]")
 
     # -------------------------------------
     # Section: Training Step

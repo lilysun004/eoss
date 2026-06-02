@@ -51,15 +51,17 @@ results_subfolder  = '0318_alloptimizers_targeted_finebatch'      # save inside 
 
 # --- Loss ---
 loss_type          = 'mse'     # 'mse' (SquaredLoss) | 'ce' (CrossEntropyLoss) | 'logistic' (LogisticLoss; SST {-1,+1})
+label_smoothing    = 0.0       # only used for loss_type='ce'; bounds logits so CE keeps a finite min / sustained EoS plateau
 
 # --- Dataset ---
-dataset            = 'cifar10' # 'cifar10' | 'cifar10_2cls' | 'cifar10_ez' | 'svhn' | 'fmnist' | 'cinic10' | 'imagenet32' | 'sst2'
+dataset            = 'cifar10' # 'cifar10' | 'cifar10_2cls' | 'cifar10_ez' | 'svhn' | 'fmnist' | 'cinic10' | 'imagenet32' | 'sst2' | 'qwen_sst2'
 num_data           = 8192      # number of training samples to use
 
 # --- Model ---
-model              = 'mlp'     # 'mlp' | 'mlp2' | 'mlp3' | 'mlp_s' | 'mlp_l' | 'mlp_silu' | 'mlp_tanh' | 'linear' | 'cnn' | 'resnet' | 'resnet_bn' | 'wrn' | 'wrn_no_bn' | 'vit' | 'sst_transformer'
+model              = 'mlp'     # 'mlp' | 'mlp2' | 'mlp3' | 'mlp_s' | 'mlp_l' | 'mlp_silu' | 'mlp_tanh' | 'linear' | 'cnn' | 'resnet' | 'resnet_bn' | 'wrn' | 'wrn_no_bn' | 'vit' | 'sst_transformer' | 'qwen_classifier'
 init_scale         = 0.2       # weight initialization scale
 no_init            = False     # True = skip custom weight initialization
+qwen_model_path    = '/n/holylabs/LABS/kdbrantley_lab/Lab/mwalden/models/Qwen2.5-0.5B-Instruct'  # local HF model dir for qwen_classifier
 
 # --- Measurements (True/False to enable/disable) ---
 full_loss_every    = 32
@@ -100,6 +102,16 @@ lobpcg_max_iters    = 20       # LOBPCG inner-loop cap for projection tracker to
 lobpcg_reltol       = 0.02     # LOBPCG convergence tolerance for projection tracker top-K
 top_k_track         = 5        # number of top Hessian eigvecs the projection tracker maintains per step
 cat3_m              = 1        # number of random Cat 3 (tangent) directions to track in projection tracker
+
+# --- Curvature failure-mode scan (Cohen et al. central flows, p.89 / Fig 29) ---
+# Set curv_n_alphas > 0 to enable per-step scans of u^T H(w) u along
+#   (a) the segment w(α) = α w_t + (1-α) w_{t+1} with u = top eigvec at midpoint
+#   (b) u_t direction at w_t (set curv_n_betas > 0)
+# Saved to curvature_segment.npz. Cadence: every curv_every tracked steps.
+curv_n_alphas       = 0        # 13 to enable segment scan (11 uniform on [0,1] + 2 fine FD at 0.5 ±0.02)
+curv_n_betas        = 0        # 9 to enable along-u scan
+curv_beta_scale     = 2.0      # β grid spans ±curv_beta_scale × |δ_t|, δ_t = <h_t, u_t>
+curv_every          = 50       # only run curvature scans every N tracked steps
 
 # --- Measurement frequency ---
 more_freq_measure   = False    # True = halve all measurement intervals
@@ -147,6 +159,15 @@ if model == 'sst_transformer':
     # initialize_net's branch is a no-op, so init_scale does not apply.
     if 'measurement_batch_size_cap' not in _overridden_keys:
         measurement_batch_size_cap = 128
+
+if model == 'qwen_classifier':
+    # Head zero-init + frozen embeddings handled inside QwenClassifier.__init__;
+    # initialize_net is a no-op for this model type.
+    if 'no_init' not in _overridden_keys:
+        no_init = True
+    # Cap second-order measurement batches to avoid OOM on 0.5B model
+    if 'measurement_batch_size_cap' not in _overridden_keys:
+        measurement_batch_size_cap = 64
 
 
 # =============================================
@@ -199,7 +220,7 @@ if __name__ == '__main__':
     if loss_type == 'mse':
         loss_fn = SquaredLoss()
     elif loss_type == 'ce':
-        loss_fn = nn.CrossEntropyLoss()
+        loss_fn = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
     elif loss_type == 'logistic':
         from utils.nets import LogisticLoss
         loss_fn = LogisticLoss()
@@ -208,7 +229,12 @@ if __name__ == '__main__':
     dataset_presets = get_dataset_presets()
     model_presets = get_model_presets()
 
-    data = prepare_dataset(dataset, DATASET_FOLDER, num_data, [], dataset_seed, loss_type=loss_type)
+    if model == 'qwen_classifier':
+        model_presets['qwen_classifier']['params']['model_path'] = qwen_model_path
+
+    data = prepare_dataset(dataset, DATASET_FOLDER, num_data, [], dataset_seed,
+                           loss_type=loss_type,
+                           tokenizer_path=qwen_model_path if model == 'qwen_classifier' else None)
 
     params = model_presets[model]['params']
     params['input_dim'] = dataset_presets[dataset]['input_dim']
@@ -265,5 +291,9 @@ if __name__ == '__main__':
         lobpcg_reltol=lobpcg_reltol,
         top_k_track=top_k_track,
         cat3_m=cat3_m,
+        curv_n_alphas=curv_n_alphas,
+        curv_n_betas=curv_n_betas,
+        curv_beta_scale=curv_beta_scale,
+        curv_every=curv_every,
         measurement_batch_size_cap=measurement_batch_size_cap,
     )

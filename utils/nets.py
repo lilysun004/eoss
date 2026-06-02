@@ -187,6 +187,14 @@ def get_model_presets():
                 'use_bert_emb': True,
             },
         },
+        'qwen_classifier': {
+            'type': 'qwen_classifier',
+            'params': {
+                # model_path injected at config.py time from qwen_model_path var
+                'n_classes': 2,       # CE loss; overridden by output_dim from dataset presets
+                'pad_token_id': 151643,  # Qwen2.5 EOS = PAD token id
+            },
+        },
     }
     return model_presets
 
@@ -469,6 +477,45 @@ class SSTTransformer(nn.Module):
         return self.head(h)  # (B, n_classes)
 
 
+class QwenClassifier(nn.Module):
+    """Qwen2.5 loaded from HuggingFace with a linear classification head.
+
+    Intended for SST-2 binary classification at EoSS. Key design choices:
+    - Token embedding frozen (requires_grad=False): sparse per-batch gradients
+      to the embedding would invalidate the batch-sharpness estimator.
+    - Flash/efficient attention disabled (attn_implementation="eager"): required
+      for second-order autograd (HVP) used by the projection tracker.
+    - Mean pool over non-padding positions: matches SSTTransformer pooling.
+    - Head zero-initialized: matches Damian et al. SSTTransformer conventions.
+    """
+    def __init__(self, model_path: str, n_classes: int = 2,
+                 pad_token_id: int = 151643):
+        super().__init__()
+        from transformers import AutoModel
+        self.backbone = AutoModel.from_pretrained(
+            model_path,
+            attn_implementation="eager",
+            torch_dtype=torch.float32,
+        )
+        d_model = self.backbone.config.hidden_size
+        self.head = nn.Linear(d_model, n_classes, bias=True)
+        nn.init.zeros_(self.head.weight)
+        nn.init.zeros_(self.head.bias)
+        self.pad_token_id = pad_token_id
+        # Freeze embedding: same reason as SSTTransformer.tok_emb
+        self.backbone.embed_tokens.weight.requires_grad_(False)
+
+    def forward(self, x):
+        # x: (B, S) long token ids
+        attention_mask = (x != self.pad_token_id).long()
+        out = self.backbone(x, attention_mask=attention_mask)
+        h = out.last_hidden_state  # (B, S, d_model)
+        # Masked mean pool — only over real (non-PAD) positions
+        mask = attention_mask.float().unsqueeze(-1)  # (B, S, 1)
+        h = (h * mask).sum(1) / mask.sum(1).clamp(min=1.0)
+        return self.head(h)  # (B, n_classes)
+
+
 def prepare_net(model_type: str,
                 params: dict
                 ):
@@ -524,6 +571,13 @@ def prepare_net(model_type: str,
             n_layers=params.get('n_layers', 2),
             n_classes=params.get('n_classes', 1),
             use_bert_emb=params.get('use_bert_emb', True),
+        )
+
+    if model_type == 'qwen_classifier':
+        net = QwenClassifier(
+            model_path=params['model_path'],
+            n_classes=params.get('output_dim', 2),
+            pad_token_id=params.get('pad_token_id', 151643),
         )
 
     return net
