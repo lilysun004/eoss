@@ -84,3 +84,11 @@ Per-run artifacts in `$RESULTS/$results_subfolder/<run_folder>/`:
 - New CLI flags: add a variable to `config.py`, thread it through `config.py`'s `train(...)` call, add the param to `train()` in `training.py`, and (if it affects tracking) to `ProjectionTracker.__init__`. The CLI parser picks it up automatically.
 - New projections: extend the `proj_*` lists in `ProjectionTracker`, update `save()`'s key list, then update `PROJECTIONS_BASE` / `PROJECTIONS_PRECOND` in `plot_histograms.py` so histograms render.
 - New optimizer: add to `utils/optimizer.py::create_optimizer`. If it has a diagonal preconditioner, expose `get_preconditioner_inv_sqrt(params) -> Tensor` on the wrapper so the tracker computes preconditioned-Hessian projections automatically.
+
+## Data backups (2026-06-04)
+Harvard cluster access removed. All data backed up:
+| What | Where |
+|---|---|
+| Experiment results (~7.5 GB — all `projections.npz`, `results.txt` per run) | HF dataset `marcwalden/eoss-results` |
+| `bert_emb_proj64.pt` (BERT SVD cache for SSTTransformer) | HF dataset `marcwalden/eoss-results` (root) |
+| This code repo | GitHub `lilysun004/eoss` |
