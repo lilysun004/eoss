@@ -36,6 +36,38 @@ Array jobs live in `marc_files/sweep_*.sh`, each submitting 5 batch sizes `(8 32
 - `marc_files/plot_optimizer_sweep.py`, `plot_batch_sweep.py` — cross-run summary grids.
 - `visualization/plot_results.py` — legacy single-run plots.
 
+## The three experiment families
+
+Everything under `marc_files/` belongs to one of three experiment families. Each has its own results location, plotting script, and entry point.
+
+### 1. Bimodality search
+
+**Goal**: find runs where a per-step projection onto the top Hessian eigenvector (`proj_w_top5`) shows a genuine period-2 / bimodal histogram near EoS.
+
+**Important context before running anything new**: an earlier LOBPCG ±u sign-ambiguity bug (now patched in `utils/measure.py::_run_lobpcg_with_operator` — eigenvectors are realigned to match the warm-start sign every step) made many runs *look* bimodal artificially. After the fix, a second, non-bug effect remains: when the top-2 Hessian eigenvalues are close, the top eigenvector direction itself can rotate step-to-step (`cos_sim_full_top5 < 1`), which can still make `proj_w_top5` look U-shaped/bimodal even though nothing is genuinely oscillating. **`proj_w_fixed_top5`** (projection onto the eigenvector frozen once at `track_from`, written when `--fixed_u True`) is immune to this and is the channel to trust for genuine bimodality claims. As of 2026-06-09, across ~156 runs spanning CNN/MLP/ViT/SST, all optimizers, multiple LRs, and both late- and early-training tracking windows, `proj_w_fixed_top5` has been unimodal in every run — see `marc_files/sweep_*.sh`, `marc_files/sweep_optimizers/`, `marc_files/sign_fix_rerun/`, and `marc_files/early_bimodality_scan*/` below for the full provenance.
+
+- **Original sweeps** (generated the base data, before the sign fix): `marc_files/sweep_*.sh` (MLP, 5 batch sizes × optimizer, submit with `sbatch marc_files/sweep_adam.sh` etc.) and `marc_files/sweep_optimizers/sweep_{cnn,vit}_*.sh`, `sweep_sst.sh`, `sweep_sst_opt_batch_mit.sh` (CNN/ViT/SST). Results land in `$RESULTS/<MLP_sweep|CNN_sweep|marc_vit_sweep|SST_opt_batch_sweep|...>/`. Pre-rendered histogram PNGs/PDFs for these are checked into `marc_files/results_histograms{,_pdf}/` — **note these predate the sign fix**, treat any apparent bimodality in `proj_w_top5` there with the caveat above and check `proj_w_fixed_top5` / `cos_sim_full_top5` instead.
+- **Sign-fix reruns**: `marc_files/sign_fix_rerun/gen_and_submit.py` regenerates sbatch scripts for the previously-"ambiguous" cells using the patched eigensolver, writing to `$RESULTS/<sweep>_signfix/`.
+- **Early-training scans** (per advisor hint that bimodality, if real, should appear early in training at large LR): `marc_files/early_bimodality_scan/` (track window [300, 2300] of a 3000-step run) and `marc_files/early_bimodality_scan_8k/` (tracks the *entire* 8000-step run, `track_from=0, track_until=8000`). Each has a `gen_and_submit.py` that generates per-cell sbatch scripts (CNN: `num_data=16384`, MLP: `num_data=8192`, both `batch_size=32`, SGD at several LRs) and submits them; results land in `<dir>/results/early_scan_<model>[_8k]/`. CNN cells are expensive (~8.8s/measurement) — `track_stride` is set higher (8 vs 2) to keep wall-clock manageable; submit with `sbatch --partition=kempner_requeue` and a generous `-t` (CNN 8k cells need ~4-5h).
+- **Plotting**: `python plot_histograms.py <run_folder>` for any single run (training curve + histograms for all `proj_*` channels + `cos_sim_full_top5`). `marc_files/plot_optimizer_sweep.py` / `plot_batch_sweep.py` for cross-run summary grids.
+
+### 2. Tangent-drift tracking
+
+**Goal**: characterize slow drift of θ along the Hessian-null/manifold-tangent (Cat 3) directions during the EoS tracking window, as a band/baseline against which the top-eigenvector projections are compared.
+
+- Scripts: `marc_files/drift_results/scripts/{cnn,mlp,vit,sst}/run_*.sh` — one per optimizer per architecture, using `--cat3_m` > 1 (random directions orthogonal to the top-K subspace, see Conventions below) and `--fixed_u True`.
+- Plotting: `marc_files/drift_results/plot_tangent_drift.py <run_folder>` — produces the median + IQR/decile drift-band figure, saved to `marc_files/drift_results/plots/`.
+- Smoke test: `marc_files/drift_results/smoke_tangent_drift.sh`.
+
+### 3. Curvature failure-mode (central-flow Fig. 29 reproduction)
+
+**Goal**: test whether the loss along the top-eigenvector direction is well-approximated by its cubic Taylor expansion near EoS (Cohen et al., *Understanding Optimization in Deep Learning with Central Flows*, p.89/Fig.29) — relevant because higher-order curvature is what would produce a genuine period-2 attractor.
+
+- Scripts: `marc_files/curvature_results/scripts/{cnn,mlp}/run_sgd.sh` (and CE-loss variants/probes under `scripts/mlp/`), enabling `--curv_n_alphas 13 --curv_n_betas 9 --curv_beta_scale 2.0 --curv_every 50`.
+- **Results save locally, not to `$RESULTS`**: these scripts override `RESULTS=/n/home06/mwalden/eoss/marc_files/curvature_results` so `projections.npz`, `curvature_segment.npz`, and rendered figures land next to the script/plot code. Keep this override when adding new curvature scripts.
+- Plotting: `marc_files/curvature_results/plot_curvature_failure.py <run_folder>` — Fig.29-style segment scans with Taylor overlays, along-eigvec scans, and aggregate signed-deviation panels.
+- `marc_files/curvature_results/process.sh` de-dupes runs and batch-renders all three plot types into `marc_files/curvature_results/plots/`. `organize_for_drive.py` / `make_paper_bimodality_figures.py` / `add_sst_to_bimodality_sweep.py` build shareable figure trees (`bimodality_sweep/`, `drift_sweep/`, `curvature_failure_sweep/`, split by `MSE`/`CE` loss and architecture).
+
 ## Architecture
 
 ### SST-2 transformer (language task)

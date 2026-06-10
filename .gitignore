@@ -12,6 +12,12 @@ results/
 marc_files/logs/
 marc_files/results_histograms/
 marc_files/results_histograms_pdf/
+marc_files/curvature_results/bimodality_sweep/
+marc_files/curvature_results/curvature_failure_sweep/
+marc_files/curvature_results/drift_sweep/
+
+# Local Claude Code session settings
+.claude/
 
 # Editor / tool scratch
 .codex

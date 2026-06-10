@@ -468,12 +468,22 @@ def _run_lobpcg_with_operator(
     eigenvalues = None
     eigenvectors = None
     iterations = None
+    X_warm_start = X.clone()
     try:
         eigenvalues, eigenvectors, iterations = torch_lobpcg(
             operator, X, max_iter=max_iterations, tol=tol
         )
     finally:
         pass
+
+    # LOBPCG's Rayleigh-Ritz step diagonalizes a small projected matrix via
+    # torch.linalg.eigh, which has no sign convention -- the returned eigenvector
+    # can be +-u independent of the warm-start direction even though the
+    # eigenspace itself is continuous across calls. Realign each output column to
+    # the sign of the warm-start vector it was seeded from so that sign is
+    # continuous across tracked steps (matching the documented warm-start contract).
+    flip = (torch.sum(eigenvectors * X_warm_start, dim=0) < 0)
+    eigenvectors = eigenvectors * torch.where(flip, -1.0, 1.0).to(eigenvectors.dtype)
 
     if eigenvector_cache is not None:
         eigenvector_list = [eigenvectors[:, i] for i in range(eigenvectors.shape[1])]

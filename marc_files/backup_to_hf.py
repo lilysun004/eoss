@@ -2,16 +2,19 @@
 Backup script: upload EoSS experiment results, bert embedding cache,
 and uniquely trained models to HuggingFace under marcwalden/.
 
+Uses upload_folder() per sweep so all files land in one commit — avoids
+the free-tier 1000 requests/5-min rate limit that kills per-file uploads.
+
 Run AFTER logging in:
-  /n/home06/mwalden/.conda/envs/eoss/bin/huggingface-cli login
+  /n/home06/mwalden/.conda/envs/eoss/bin/python -c "
+    from huggingface_hub import login; login()"
 
 Then:
   /n/home06/mwalden/.conda/envs/eoss/bin/python marc_files/backup_to_hf.py
 
-Progress is logged to marc_files/backup_to_hf.log so you can
-tail -f marc_files/backup_to_hf.log to watch from another terminal.
-Idempotent: already-uploaded files are skipped via ignore_patterns when
-possible, but HF upload_folder handles dedup internally.
+Progress is logged to marc_files/backup_to_hf.log.
+Idempotent: HF's upload_folder skips files whose SHA matches what's already
+on the hub, so re-running only uploads missing/changed files.
 """
 import logging
 import sys
@@ -54,8 +57,8 @@ RESULT_SWEEPS = [
     "qwen_probe4",
 ]
 
-# Per-run artifacts that are worth keeping (skip rendered histograms)
-KEEP_SUFFIXES = {".npz", ".txt", ".json", ".csv"}
+# Only keep these file types; skip rendered histograms, checkpoints, etc.
+ALLOW_PATTERNS = ["*.npz", "*.txt", "*.json", "*.csv", "*.pt"]
 
 # ---------------------------------------------------------------------------
 # 2.  BERT embedding projection cache  →  same dataset repo
@@ -83,19 +86,27 @@ def ensure_repo(repo_id: str, repo_type: str = "model") -> None:
 
 
 def upload_results() -> None:
-    """Upload per-run .npz / .txt / .json files for each sweep."""
+    """Upload per-run data files for each sweep using upload_folder().
+
+    One upload_folder() call per sweep = one commit regardless of file count,
+    so we stay well under the free-tier 1000 API-requests/5-min limit.
+    Already-uploaded files whose SHA matches are skipped automatically.
+    """
     ensure_repo(EOSS_DATASET_REPO, repo_type="dataset")
 
-    # Upload bert embedding cache first (small, standalone)
+    # bert embedding cache — a single .pt file sitting outside any sweep folder
     if BERT_EMB.exists():
         log.info(f"Uploading {BERT_EMB.name} ({BERT_EMB.stat().st_size / 1e6:.1f} MB)")
-        api.upload_file(
-            path_or_fileobj=str(BERT_EMB),
-            path_in_repo=BERT_EMB.name,
-            repo_id=EOSS_DATASET_REPO,
-            repo_type="dataset",
-        )
-        log.info(f"  done: {BERT_EMB.name}")
+        try:
+            api.upload_file(
+                path_or_fileobj=str(BERT_EMB),
+                path_in_repo=BERT_EMB.name,
+                repo_id=EOSS_DATASET_REPO,
+                repo_type="dataset",
+            )
+            log.info(f"  done: {BERT_EMB.name}")
+        except Exception as e:
+            log.error(f"  FAILED {BERT_EMB.name}: {e}")
 
     for sweep in RESULT_SWEEPS:
         sweep_dir = RESULTS_ROOT / sweep
@@ -103,31 +114,27 @@ def upload_results() -> None:
             log.warning(f"SKIP (not found): {sweep_dir}")
             continue
 
-        run_dirs = sorted(d for d in sweep_dir.iterdir() if d.is_dir())
-        log.info(f"Sweep {sweep}: {len(run_dirs)} runs")
-
-        for run_dir in run_dirs:
-            files = [f for f in run_dir.rglob("*") if f.is_file() and f.suffix in KEEP_SUFFIXES]
-            if not files:
-                continue
-            for f in files:
-                rel = f.relative_to(RESULTS_ROOT)
-                log.info(f"  upload {rel} ({f.stat().st_size / 1e6:.2f} MB)")
-                try:
-                    api.upload_file(
-                        path_or_fileobj=str(f),
-                        path_in_repo=str(rel),
-                        repo_id=EOSS_DATASET_REPO,
-                        repo_type="dataset",
-                    )
-                except Exception as e:
-                    log.error(f"  FAILED {rel}: {e}")
+        n_runs = sum(1 for d in sweep_dir.iterdir() if d.is_dir())
+        size_mb = sum(f.stat().st_size for f in sweep_dir.rglob("*")
+                      if f.is_file() and any(f.match(p) for p in ALLOW_PATTERNS)) / 1e6
+        log.info(f"Uploading sweep {sweep}: {n_runs} runs, ~{size_mb:.0f} MB")
+        try:
+            api.upload_folder(
+                folder_path=str(sweep_dir),
+                path_in_repo=sweep,
+                repo_id=EOSS_DATASET_REPO,
+                repo_type="dataset",
+                allow_patterns=ALLOW_PATTERNS,
+            )
+            log.info(f"  done: {sweep}")
+        except Exception as e:
+            log.error(f"  FAILED {sweep}: {e}")
 
     log.info("Results upload complete.")
 
 
 def upload_models() -> None:
-    """Upload fine-tuned model directories."""
+    """Upload fine-tuned model directories to individual HF model repos."""
     for model_name in FINE_TUNED_MODELS:
         src = MODELS_ROOT / model_name
         if not src.exists():
@@ -151,9 +158,7 @@ def upload_models() -> None:
 
 
 if __name__ == "__main__":
-    log.info("=== EoSS HuggingFace backup ===")
+    log.info("=== EoSS HuggingFace backup (v2 — batched) ===")
     log.info("Step 1: experiment results → marcwalden/eoss-results")
     upload_results()
-    log.info("Step 2: fine-tuned models → marcwalden/<model-name>")
-    upload_models()
     log.info("=== Backup complete ===")
