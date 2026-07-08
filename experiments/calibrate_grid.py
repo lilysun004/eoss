@@ -39,8 +39,8 @@ from utils.measure import (
 T.set_num_threads(4)
 
 DATASET_FOLDER = os.environ['DATASETS']
-NUM_DATA = 2048
-MODEL = 'mlp_s'
+NUM_DATA = int(os.environ.get('EOSS_NUM_DATA', '2048'))
+MODEL = os.environ.get('EOSS_MODEL', 'mlp_s')
 OUT_DIR = os.path.join(_REPO_ROOT, 'results', 'calib2')
 os.makedirs(OUT_DIR, exist_ok=True)
 
