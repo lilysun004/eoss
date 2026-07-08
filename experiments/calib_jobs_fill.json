@@ -1,0 +1,4 @@
+[
+  {"cell": "SGDM_beta0.99_b8", "optimizer": "SGD-Momentum", "params": {"beta": 0.99}, "batch": 8, "lr_candidates": [0.0003, 0.0005, 0.0002], "steps": 4500, "measure_every": 130},
+  {"cell": "Adam_beta1_0.99_b8", "optimizer": "Adam", "params": {"beta1": 0.99, "beta2": 0.99}, "batch": 8, "lr_candidates": [0.0003, 0.0002, 0.00015], "steps": 5000, "measure_every": 140}
+]

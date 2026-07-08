@@ -1,0 +1,86 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{amsmath}
+
+\title{Edge of Stochastic Stability}
+\author{xqsun }
+\date{July 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Motivation}
+Deep networks train at the edge of stability (EoS): sharpness (max eigenvalue of Hessian) $\lambda$ oscillates at some value.
+
+\begin{enumerate}
+    \item Full-batch vanilla GD: $\lambda \approx \frac{2}{\eta}$. This comes from iterate $x_{t+1}=(1-\eta \lambda) x_t$ which diverges when $\lambda > 2/\eta$.
+    \item Full-batch momentum: $\lambda \approx \frac{2(1+\beta)}{\eta}$
+    \item Full-batch EMA-style momentum: $\lambda \approx \frac{2(1+\beta)}{(1-\beta)\eta}$ 
+    \item Full-batch preconditioned GD / frozen Adam / RMS Prop like: relevant Hessian is not $H$ but $P^{-1/2}HP^{-1/2}$ (assuming fixed preconditioner $P$ so update is $\theta_{t+1}=\theta_t-\eta P^{-1} g_t$.
+
+    \item Mini-batch SGD: quantity stabilizing near $2\eta$ is not sharpness of the full Hessian $\lambda(H)$, but \textbf{batch sharpness} $\lambda(H_B)$. A paper ``SGD at the Edge of Stability: The Stochastic Sharpness Gap'' frames this as stochastic self-stabilization: minibatch noise injects variance strengthening the curvature-reducing cubic force.
+\end{enumerate}
+
+However, what is missing is a general quantity that stabilizes for \textbf{any optimizer under stochastic settings}. The dream is to: without having to bother about optimizer dynamics / math, be able to find one quantity that is STABILIZING at a known value. This quantity is made up of calculable properties e.g. alignment of iterates with gradients or sizes of iterates or ANYTHING that is computable from the actual optimization path. So the goal is: from the iterate/loss/gradient/eigenvector currently, compute some quantity, and show that if you compute this, for ANY optimizer, it is some fixed value (e.g. $2/\eta$, or $2$, or anything).
+
+\section{Findings So Far}
+Refer to EoSS.pdf for philosophy of EoSS, and self-stabilization.pdf for a nice analytic story.
+
+\textbf{Main intuition: loss-no-change condition.}
+Fix a mini-batch loss $L_B(\theta)$ at iterate $\theta$ and let the optimizer propose a step
+\[
+s \;:=\; \theta^+ - \theta
+\qquad(\text{so for SGD } s=-\eta g_B,\ \text{for momentum/adaptive it is more complex}).
+\]
+A second-order Taylor expansion gives
+\[
+L_B(\theta+s)-L_B(\theta)\;\approx\; g_B^\top s \;+\;\tfrac12 s^\top H_B s.
+\]
+At a marginal-stability operating point (``edge''), the linear descent term and quadratic penalty balance (loss-no-change condition):
+\[
+g_B^\top s \;+\;\tfrac12 s^\top H_B s \;\approx\; 0
+\quad\Longrightarrow\quad
+\underbrace{\frac{s^\top H_B s}{-g_B^\top s}}_{\text{dimensionless update-curvature ratio}}\;\approx\; 2.
+\]
+\emph{This} is the motivating scalar from the transcript: it is written in terms of \textbf{(step, Hessian-on-batch, gradient-on-batch)} and should be the most optimizer-agnostic place to look.
+
+We call this GBS (generalized batch sharpness), with the expectation taken either outside the fraction or on the num/denom separately.
+
+$$
+GBS = \mathbb{E}_B\left[\frac{s_B H_Bs_B}{-g_Bs_B}\right]
+$$
+
+**IMPORTANT** Empirically, we already have the following findings:
+\begin{enumerate}
+    \item At all batch sizes (large/full to small batch), for SGD, it stabilizes at 2. This is expected from EoSS.pdf's findings since GBS is simply BS rewritten.
+    \item For ALL OPTIMIZERS (for our purposes, SGD, SGD-Momentum, SGD-Adam and SGD-Muon), GBS stabilizes at 2 FOR LARGE BATCH SIZES. This is non-obvious: this means for full batch there is some quantity that is optimizer-agnostic and you can just compute that stabilizes at 2. However, for all optimizers EXCEPT SGD, at small batch sizes, GBS stabilizes BELOW 2.
+\end{enumerate}
+
+Finding 2 could be because: what makes SGD unique from other optimizers is that its step $s_B$ and gradient $g_B$ are ALIGNED regardless of batch size (obviously $g_B$ not aligned with $g$ in general due to batch noise) whereas for other optimizers, $s_B$ and $g_B$ are not aligned in general, and they are also not aligned with full batch. But this makes me feel that there is some correction factor about the alignment of $s_B, g_B$ and maybe even $u_B$ (top eigenvector of $H_B$), or with $s,g,u$ (full batch ``true loss'' quantities). For instance it could be that the loss projected in direction of $s_B/g_B/u_B$ (i.e. every quantity in the Taylor expansion is projected) doesn't decrease, rather than the full loss-no-change. 
+
+This codebase contains research code where I was trying to find this universal quantity. I tried a bunch of combinations so far, but I need help with a more targeted search and faster iteration.
+
+\section{Instructions}
+
+My vague suggested directions:
+\begin{enumerate}
+    \item Prioritize thinking about batch quantities (i.e. like the EoSS story, EoSS happens on a batch level, because of the batch iterates/loss landscape being a certain way, RATHER THAN because it's bouncing on some true loss landscape, since even without the edge of stability iterates will bounce on the full loss landscape due to stochasticity). 
+    \item The loss-no-change condition, or the projected-loss-no-change condition, may be the wrong thing to look at. Likely we want the condition to come from $\theta_{t+1} = f(\theta_t)$ i.e. the recursive iterate equation, which was how the initial EoS was derived (when the Jacobian or something of this causes it to diverge). Is there an optimizer-agnostic way to write this? Maybe this will involve more PARAMETER JACOBIANS rather than loss landscape things. Explore that.
+    \item Look at distributions of quantities / plots, because it may not be the EXPECTATION of the quantity but some kind of log-normal condition, or some other stability condition e.g. log stability. 
+\end{enumerate}
+
+Codebase instructions
+\begin{enumerate}
+    \item Feel free to change ANY code you want, e.g. deleting weird projection combinations no longer needed, probably you want to delete most of them. Prioritize the new directions rather than old experiments, simply build on top of it and delete liberally. You have full agency and control and there is a safe backup of code already.
+    \item Mostly ignore marc\_files folder.
+    \item Delegate subagents to do separate tasks and report back which worked and which didn't. I don't need a full-one-shot success, I just want you to REDUCE UNCERTAINTY QUICKEST.
+    \item Make sure all experiments are simple as possible, on CIFAR MLP not transformer/LLM, run on CPU, keep them to fewer steps / enough to see stabilizing. Log whatever you need in whatever .txt files, doesn't have to be readable, but ideally I want to see a visible progress bar.
+\end{enumerate}
+
+\section{Claude's suggested directions}
+See suggested.txt. Follow that guidance and godspeed!
+
+\end{document}
+
+

@@ -1,0 +1,6 @@
+[
+  {"cell": "SGDM09_b2048_long", "optimizer": "SGD-Momentum", "params": {"beta": 0.9}, "batch": 2048, "lr_candidates": [0.0015], "steps": 8000, "measure_every": 200},
+  {"cell": "Muon_b2048_long",   "optimizer": "Muon", "params": {"momentum": 0.9}, "batch": 2048, "lr_candidates": [0.003], "steps": 6000, "measure_every": 150},
+  {"cell": "Muon_b128_long",    "optimizer": "Muon", "params": {"momentum": 0.9}, "batch": 128,  "lr_candidates": [0.003], "steps": 5000, "measure_every": 150},
+  {"cell": "SGDM_beta0.99_b8_v2","optimizer": "SGD-Momentum", "params": {"beta": 0.99}, "batch": 8, "lr_candidates": [0.0001, 0.00015], "steps": 6000, "measure_every": 170}
+]

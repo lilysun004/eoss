@@ -1,0 +1,17 @@
+[
+  {"cell": "SGD_b16",   "optimizer": "SGD", "params": {}, "batch": 16, "lr_candidates": [0.012, 0.015, 0.018], "steps": 2500, "measure_every": 75},
+  {"cell": "SGD_b32",   "optimizer": "SGD", "params": {}, "batch": 32, "lr_candidates": [0.015, 0.018, 0.02], "steps": 2200, "measure_every": 70},
+  {"cell": "SGD_b64",   "optimizer": "SGD", "params": {}, "batch": 64, "lr_candidates": [0.018, 0.02, 0.015], "steps": 2000, "measure_every": 65},
+
+  {"cell": "SGDM09_b16","optimizer": "SGD-Momentum", "params": {"beta": 0.9}, "batch": 16, "lr_candidates": [0.0022, 0.0025, 0.003], "steps": 3000, "measure_every": 90},
+  {"cell": "SGDM09_b32","optimizer": "SGD-Momentum", "params": {"beta": 0.9}, "batch": 32, "lr_candidates": [0.0025, 0.003, 0.0035], "steps": 2600, "measure_every": 80},
+  {"cell": "SGDM09_b64","optimizer": "SGD-Momentum", "params": {"beta": 0.9}, "batch": 64, "lr_candidates": [0.003, 0.0035, 0.004], "steps": 2400, "measure_every": 75},
+
+  {"cell": "Adam_b16",  "optimizer": "Adam", "params": {"beta1": 0.9, "beta2": 0.99}, "batch": 16, "lr_candidates": [0.001, 0.0012, 0.0015], "steps": 3000, "measure_every": 90},
+  {"cell": "Adam_b32",  "optimizer": "Adam", "params": {"beta1": 0.9, "beta2": 0.99}, "batch": 32, "lr_candidates": [0.001, 0.0012, 0.0015], "steps": 2600, "measure_every": 80},
+  {"cell": "Adam_b64",  "optimizer": "Adam", "params": {"beta1": 0.9, "beta2": 0.99}, "batch": 64, "lr_candidates": [0.001, 0.0012, 0.0015], "steps": 2400, "measure_every": 75},
+
+  {"cell": "Muon_b16",  "optimizer": "Muon", "params": {"momentum": 0.9}, "batch": 16, "lr_candidates": [0.003, 0.004, 0.005], "steps": 3500, "measure_every": 100},
+  {"cell": "Muon_b32",  "optimizer": "Muon", "params": {"momentum": 0.9}, "batch": 32, "lr_candidates": [0.003, 0.004, 0.005], "steps": 3000, "measure_every": 90},
+  {"cell": "Muon_b64",  "optimizer": "Muon", "params": {"momentum": 0.9}, "batch": 64, "lr_candidates": [0.003, 0.004, 0.005], "steps": 2600, "measure_every": 80}
+]

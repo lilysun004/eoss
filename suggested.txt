@@ -1,0 +1,159 @@
+This is a fun problem, and the project files give a clean frame for it: the self-stabilization paper derives everything from the recursion (Jacobian I−ηHI-\eta H
+I−ηH, blow-up in uu
+u, cubic feedback), while EoSS explicitly frames batch sharpness as a one-sided instability certificate of the mini-batch recursion, not as a loss-stationarity identity. That asymmetry is, I think, exactly where your GBS anomaly lives. Let me first offer a diagnosis of the below-2 finding, because each candidate diagnosis generates a different family of universal quantities, then go through the recursion-based and distribution-based directions with concrete experiments.
+First, why GBS = 2 at large batch is not mysterious — and what that tells you
+A useful sanity check that sharpens intuition: on a pure quadratic, ΔL=g⊤s+12s⊤Hs\Delta L = g^\top s + \tfrac12 s^\top H s
+ΔL=g⊤s+21​s⊤Hs holds exactly per step, for any optimizer. So at any statistically stationary oscillation (marginal stability, loss not trending), the time-averaged ratio is exactly 2 — trivially, for every optimizer. The nontrivial content is that the realized step ss
+s "knows" the resonant mode. Example: heavy-ball at its edge oscillates with period-2 sign flips in the uu
+u direction, so the buffer mt=βmt−1+gtm_t = \beta m_{t-1} + g_t
+mt​=βmt−1​+gt​ sums an alternating series: m≈g/(1+β)m \approx g/(1+\beta)
+m≈g/(1+β), not the steady-state g/(1−β)g/(1-\beta)
+g/(1−β). Plug into the ratio: ηλ/(1+β)=2⇒λ=2(1+β)/η\eta\lambda/(1+\beta) = 2 \Rightarrow \lambda = 2(1+\beta)/\eta
+ηλ/(1+β)=2⇒λ=2(1+β)/η — the known momentum threshold pops out automatically. GBS is optimizer-agnostic at large batch because the oscillation structure is encoded in ss
+s itself.
+This immediately suggests why small batch breaks it for non-SGD optimizers: noise decoheres the oscillation phase. The buffer's effective transfer at a clean period-2 oscillation differs from its transfer at a broadband, phase-randomized oscillation. So the deficit 2−GBS2-\text{GBS}
+2−GBS should be a function of how much the optimizer's state filters/decorrelates the current batch — and there are three distinct (compatible) mechanisms worth separating experimentally:
+Mechanism A — step–noise coupling. For SGD, s=−ηgBs = -\eta g_B
+s=−ηgB​: the step is 100% current-batch, so the noise in ss
+s is perfectly correlated with the noise in HBH_B
+HB​ and gBg_B
+gB​. The Gauss–Newton structure makes per-sample gradients align with per-sample Hessian top directions, so the noise–noise term E[ξ⊤HBξ]\mathbb{E}[\xi^\top H_B \xi]
+E[ξ⊤HB​ξ] is large and positive in the numerator. For momentum/Adam, only an O(1−β)O(1-\beta)
+O(1−β) fraction of ss
+s is current-batch; the rest is independent of HBH_B
+HB​, so E[s⊤HBs]→sˉ⊤Hsˉ\mathbb{E}[s^\top H_B s] \to s̄^\top H s̄
+E[s⊤HB​s]→sˉ⊤Hsˉ-like terms with the full Hessian, which is flatter.
+Mechanism B — mode mixture. GBS is an energy-weighted average of per-mode ratios: modes at the edge contribute ≈2, stable bulk modes are genuinely descending and contribute <2. At small batch, gBg_B
+gB​ lives almost entirely in the top eigenspace of HBH_B
+HB​ (few outer products), so SGD's weighting is edge-dominated → mean ≈ 2. Momentum averages noise and Adam/Muon deliberately flatten the spectrum, redistributing step energy into the descending bulk → weighted mean pulled below 2. If this is the story, the universal quantity is simply GBS restricted to the unstable subspace, and the below-2 values are a weighting artifact, not a different stability condition.
+Mechanism C — wrong moment. The invariant condition might not be a condition on E[⋅]\mathbb{E}[\cdot]
+E[⋅] at all (your direction 3; more below). The three mechanisms are distinguishable, and I'd test B first because it's the cheapest and most decisive.
+Direction 1: conditions from the iterate recursion
+Every first-order optimizer is a map on an augmented state: zt=(θt,mt,vt,… )z_t = (\theta_t, m_t, v_t, \dots)
+zt​=(θt​,mt​,vt​,…), zt+1=F(zt;Bt)z_{t+1} = F(z_t; B_t)
+zt+1​=F(zt​;Bt​). Linearizing gives a random Jacobian cocycle Jt=∂F/∂zJ_t = \partial F/\partial z
+Jt​=∂F/∂z, and "edge" is by definition marginal stability of the product ∏tJt\prod_t J_t
+∏t​Jt​. For SGD this is Jt=I−ηHBtJ_t = I - \eta H_{B_t}
+Jt​=I−ηHBt​​; for heavy-ball it's the companion matrix ((1+β)I−ηHBt−βII0)\begin{pmatrix}(1+\beta)I - \eta H_{B_t} & -\beta I\\ I & 0\end{pmatrix}
+((1+β)I−ηHBt​​I​−βI0​); for frozen-preconditioner Adam it's the same with Pt−1HBtP_t^{-1}H_{B_t}
+Pt−1​HBt​​. This is the optimizer-agnostic formulation, and it's exactly how the original EoS threshold and the EoSS divergence certificate were derived. The catch — and the interesting part — is that for a random matrix product there is no single notion of marginal stability. There's a hierarchy:
+
+Almost-sure / log stability: top Lyapunov exponent γ=lim⁡1T∑log⁡∥Jtvt∥∥vt∥=0\gamma = \lim \frac1T \sum \log \frac{\|J_t v_t\|}{\|v_t\|} = 0
+γ=limT1​∑log∥vt​∥∥Jt​vt​∥​=0. This is the "log-normal condition" you gestured at, made precise.
+Annealed / mean stability: E[ρ(Jt)]=1\mathbb{E}[\rho(J_t)] = 1
+E[ρ(Jt​)]=1 per step. For SGD this is E[∣1−ηλ(HB)∣]=1⇔E[λB]=2/η\mathbb{E}[|1-\eta\lambda(H_B)|] = 1 \Leftrightarrow \mathbb{E}[\lambda_B] = 2/\eta
+E[∣1−ηλ(HB​)∣]=1⇔E[λB​]=2/η — i.e., this moment reproduces batch sharpness. So EoSS as observed is consistent with the mean condition for SGD.
+Mean-square stability: top eigenvalue of E[J⊗J]\mathbb{E}[J\otimes J]
+E[J⊗J] equals 1. In the scalar unstable mode xt+1=(1−ηht)xt−ηξtx_{t+1} = (1-\eta h_t)x_t - \eta\xi_t
+xt+1​=(1−ηht​)xt​−ηξt​, this is E[(1−ηh)2]=1\mathbb{E}[(1-\eta h)^2]=1
+E[(1−ηh)2]=1, i.e. E[h2]/E[h]=2/η\mathbb{E}[h^2]/\mathbb{E}[h] = 2/\eta
+E[h2]/E[h]=2/η — a "variance-corrected sharpness" where the second moment of directional batch curvature over its first moment is what's pinned. Mean-square is also the natural notion when there's additive forcing (ξt\xi_t
+ξt​), because it's what governs existence of a stationary oscillation amplitude — and the amplitude is what feeds the cubic self-stabilization force βx2/2\beta x^2/2
+βx2/2 in the Damian et al. mechanism.
+
+These three coincide when the per-step growth factor has vanishing variance — which is exactly the large-batch limit. That single observation already "predicts" your finding 2: everything agrees at 2 for large batch, and the conditions fan out at small batch. The empirical question is which member of the hierarchy is the invariant across optimizers, and the others then sit above/below it by Jensen-type gaps whose size depends on the optimizer's noise filtering. Note the sign structure is a real test: if the invariant were E[log⁡a]=0\mathbb{E}[\log a]=0
+E[loga]=0, then E[a]=eμ+σ2/2\mathbb{E}[a] = e^{\mu + \sigma^2/2}
+E[a]=eμ+σ2/2-style corrections put the mean-measured quantity above threshold; if the invariant is mean-square, the mean sits below. Your "below 2" data point is already evidence you can score against each hypothesis once you translate GBS into growth-factor language.
+Concretely measurable via tangent propagation: maintain a tangent vector on the augmented state and push it through the actual optimizer step with torch.func JVPs (the HBtδθH_{B_t}\delta\theta
+HBt​​δθ piece is one HVP; the momentum/Adam-state derivatives come for free by differentiating through the optimizer update; for Adam you can validate a frozen-vv
+v approximation against the full JVP). Then at=∥Jtvt∥/∥vt∥a_t = \|J_t v_t\|/\|v_t\|
+at​=∥Jt​vt​∥/∥vt​∥ is one scalar per step and you time-average log⁡at\log a_t
+logat​, ata_t
+at​, at2a_t^2
+at2​. This sidesteps ever having to choose between uBu_B
+uB​ and uu
+u — the propagated tangent finds the realized unstable direction itself.
+A second recursion-flavored framing I'd push on because it's both principled and produces observables: the control-theory / transfer-function view. To leading order, every optimizer in your list is a linear time-invariant filter from gradients to steps: st=−Φ(q) gts_t = -\Phi(q)\, g_t
+st​=−Φ(q)gt​ with ΦSGD=η\Phi_{\text{SGD}} = \eta
+ΦSGD​=η, ΦHB(z)=η/(1−βz−1)\Phi_{\text{HB}}(z) = \eta/(1-\beta z^{-1})
+ΦHB​(z)=η/(1−βz−1), frozen-Adam a preconditioned EMA filter, etc. Closing the loop through the curvature (g≈h x+ξg \approx h\, x + \xi
+g≈hx+ξ in the unstable direction) gives characteristic equation z−1+h Φ(z)=0z - 1 + h\,\Phi(z) = 0
+z−1+hΦ(z)=0, and "edge" is the closed-loop pole touching the unit circle. This unifies all the classical thresholds (2/η2/\eta
+2/η, 2(1+β)/η2(1+\beta)/\eta
+2(1+β)/η, preconditioned variants) as one statement, and stochasticity turns hh
+h into a random process — bringing you back to the Lyapunov hierarchy, but now with an optimizer-agnostic scalar family: per-step closed-loop pole modulus ρt\rho_t
+ρt​ computed from the measured ht=u⊤HBtuh_t = u^\top H_{B_t} u
+ht​=u⊤HBt​​u plugged into the known companion matrix. The candidate universal invariants become E[log⁡ρt]=0\mathbb{E}[\log\rho_t]=0
+E[logρt​]=0 vs E[ρt]=1\mathbb{E}[\rho_t]=1
+E[ρt​]=1 vs the L2L^2
+L2 version. Even more radically observable: fit an AR(2)/AR(kk
+k) model to the raw time series xt=u⊤(θt−EMA(θt))x_t = u^\top(\theta_t - \text{EMA}(\theta_t))
+xt​=u⊤(θt​−EMA(θt​)) and check that the top empirical pole modulus is 1 across optimizers — a quantity computed purely from the iterate path, no Hessians at all, which matches your "ANYTHING computable from the optimization path" desideratum. The quantitative content is then the map between measured curvature statistics and that pole.
+One caution on the recursion program: the loss-no-change ratio is a near-tautology of loss stationarity (it holds whenever the loss plateaus, edge or not), whereas EoSS's batch sharpness is an instability certificate — it predicts divergence/catapults when violated. The recursion conditions inherit the certificate property; the loss-based ones don't. This suggests a ground-truth arbiter for all candidates: which quantity's threshold-crossing best predicts catapults (see experiment 7).
+Direction 2: alternatives to the expectation condition
+
+**The (μ,σ2)(\mu, \sigma^2)
+(μ,σ2)-plane experiment (my top pick).** For each (optimizer, batch size), collect the per-step growth factors ata_t
+at​ (from tangent propagation, or per-step closed-loop pole, or even per-step GBSt_t
+t​ as a proxy), fit μ=E[log⁡a]\mu = \mathbb{E}[\log a]
+μ=E[loga] and σ2=Var[log⁡a]\sigma^2 = \mathrm{Var}[\log a]
+σ2=Var[loga], and plot every configuration as a point in the (σ2,μ)(\sigma^2, \mu)
+(σ2,μ) plane. Under a log-normal ansatz the three stability notions are lines: μ=0\mu = 0
+μ=0 (a.s.), μ=−σ2/2\mu = -\sigma^2/2
+μ=−σ2/2 (mean), μ=−σ2\mu = -\sigma^2
+μ=−σ2 (L2L^2
+L2). Large-batch points cluster at the origin; small-batch points fan out — and whichever line they all lie on is your universal condition, with the deviation of any mean-based quantity like GBS then a computable Jensen correction. Two fitted numbers per run, one plot, potentially the whole answer.
+Quantiles instead of moments. If per-step GBSt_t
+t​ (or hth_t
+ht​) is heavy-tailed — and EoSS's catapult story says the tails matter — the invariant might be a quantile: median(GBSt_t
+t​) = 2 while the mean drifts, or P(at>1)=1/2P(a_t > 1) = 1/2
+P(at​>1)=1/2 (equal time expanding vs contracting), or a pinned tail probability P(ht>2/η)=cP(h_t > 2/\eta) = c
+P(ht​>2/η)=c tied to catapult frequency. You likely already have the step-level point clouds; overlaying medians vs means across optimizers is nearly free.
+Log-loss stationarity. Near interpolation with MSE, stationarity of log⁡L\log L
+logL rather than LL
+L reweights the GBS expectation by 1/LB1/L_B
+1/LB​: E[(s⊤HBs)/LB] / E[(−gB⊤s)/LB]\mathbb{E}[(s^\top H_B s)/L_B]\,/\,\mathbb{E}[(-g_B^\top s)/L_B]
+E[(s⊤HB​s)/LB​]/E[(−gB⊤​s)/LB​]. Cheap to add to the sweep; it's a different, principled expectation structure ("outside vs inside vs weighted" all differ at small batch by Jensen, so report all).
+Stationarity of the observed loss sequence. E[LBt+1(θt+1)−LBt(θt)]=0\mathbb{E}[L_{B_{t+1}}(\theta_{t+1}) - L_{B_t}(\theta_t)] = 0
+E[LBt+1​​(θt+1​)−LBt​​(θt​)]=0 with fresh batches reduces to full-loss stationarity, giving the ratio E[s⊤Hs]/E[−g⊤s]=2\mathbb{E}[s^\top H s]/\mathbb{E}[-g^\top s] = 2
+E[s⊤Hs]/E[−g⊤s]=2 with full H,gH, g
+H,g but the actual stochastic step. Worth measuring as a baseline: the gap between this (≈2 always, mildly below since loss still trends down) and per-batch GBS isolates the "each step over-descends its own batch while raising the others" cross-batch interference — which is Mechanism A quantified.
+
+Direction 3: targeted decompositions of GBS itself
+
+Subspace-restricted GBS (tests Mechanism B). Split numerator and denominator into the top-kk
+k eigenspace of HBH_B
+HB​ (or of HH
+H) versus the complement, via a few Lanczos vectors. Prediction if B is right: GBStop≈2_{\text{top}} \approx 2
+top​≈2 for *all* optimizers at *all* batch sizes, GBSbulk<2_{\text{bulk}} < 2
+bulk​<2 and optimizer-dependent, and total GBS is the energy-weighted mixture. If this holds, you're done at the level of "one quantity, known value" — the quantity is the update–curvature ratio projected on the unstable subspace, and the projected-loss-no-change hunch in your notes is vindicated in a specific form.
+Coupled/decoupled step decomposition (tests Mechanism A). For momentum the split is exact: st=sc+sds_t = s_c + s_d
+st​=sc​+sd​ with sc=−η (coeff) gBts_c = -\eta\,\text{(coeff)}\,g_{B_t}
+sc​=−η(coeff)gBt​​ the current-batch part and sds_d
+sd​ the history part, independent of BtB_t
+Bt​. Measure the block ratios E[sc⊤HBsc]/E[−gB⊤sc]\mathbb{E}[s_c^\top H_B s_c]/\mathbb{E}[-g_B^\top s_c]
+E[sc⊤​HB​sc​]/E[−gB⊤​sc​], cross terms, and sds_d
+sd​ blocks separately. Also directly measure the buffer's effective gain in the uu
+u-subspace vs the bulk — the 1/(1+β)1/(1+\beta)
+1/(1+β)-vs-1/(1−β)1/(1-\beta)
+1/(1−β) alternation story predicts a specific frequency-dependent gain, and its decoherence at small batch is measurable as the width of the spectral peak of u⊤θtu^\top\theta_t
+u⊤θt​.
+β\beta
+β-sweep interpolation. Fix a small batch size, sweep momentum β∈{0,0.3,0.6,0.9,0.99}\beta \in \{0, 0.3, 0.6, 0.9, 0.99\}
+β∈{0,0.3,0.6,0.9,0.99} (and Adam β1\beta_1
+β1​), plot the GBS plateau vs β\beta
+β. Any correction-factor theory (coupling fraction, mode mixture, Jensen gap) makes a quantitative prediction on this curve; it's the cleanest way to falsify between them because β=0\beta=0
+β=0 must recover 2 continuously.
+
+Ranked experiment list
+
+Subspace-restricted GBS via Lanczos (cheapest, potentially decisive on Mechanism B).
+Step-level GBSt_t
+t​ distributions you likely already log: median vs mean vs log-mean across the optimizer × batch grid (nearly free; screens Mechanism C).
+Tangent-propagation growth factors + the (σ2,μ)(\sigma^2, \mu)
+(σ2,μ)-plane plot (the principled version of 2; moderate engineering, one-time torch.func harness reusable for every optimizer).
+β\beta
+β-sweep at fixed small batch, plateau vs β\beta
+β, scored against each mechanism's predicted curve.
+Coupled/decoupled block ratios for momentum (exact decomposition; isolates Mechanism A).
+Full-loss trajectory ratio E[s⊤Hs]/E[−g⊤s]\mathbb{E}[s^\top Hs]/\mathbb{E}[-g^\top s]
+E[s⊤Hs]/E[−g⊤s] on a large held batch as the stationarity baseline.
+Catapult ROC: mark catapult onsets, then compare candidate quantities (batch sharpness, GBS variants, per-step pole modulus, L2L^2
+L2 condition) on how well threshold-crossings predict them across optimizers. This operationalizes "instability certificate" as the selection criterion, consistent with EoSS's philosophy.
+Synthetic arbiter: a diagonal quadratic with hth_t
+ht​ resampled from the empirical per-batch curvature distribution harvested from your real runs; find each optimizer's true divergence threshold numerically and check it against the a.s./mean/L2L^2
+L2 predictions with no deep-learning confounders.
+
+Two pitfalls to build in from the start: report both expectation placements (outside the ratio vs separate num/denom), since Jensen gaps are themselves batch-size dependent and could masquerade as physics; and control for loss-decrease rate when comparing optimizers, since the "ratio = 2" family is only exact at strict stationarity and different optimizers plateau at different residual descent rates.
+If I had to bet: Mechanism B (mode mixture) explains most of the deficit, the true invariant is the mean condition restricted to the unstable subspace, and the log/L² distinctions become visible only in the smallest-batch, heaviest-tail regimes — which is also exactly where experiment 8 would show the a.s./mean-square thresholds separating from the mean one. But the (σ2,μ)(\sigma^2,\mu)
+(σ2,μ) plot is the experiment that would change my mind fastest. 

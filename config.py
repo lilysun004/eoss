@@ -18,10 +18,16 @@ from training import train
 # -------------------------------------
 # Environment
 # -------------------------------------
+# If DATASETS isn't already exported (e.g. by a cluster sbatch script), fall
+# back to repo-local folders and skip torchvision's CIFAR-10 checksum (our
+# local copy comes from a HF mirror, not the official host, so its file
+# bytes/MD5s legitimately differ). Cluster runs that export DATASETS/RESULTS
+# themselves are unaffected by any of this.
+_REPO_ROOT = Path(__file__).resolve().parent
 if 'DATASETS' not in os.environ:
-    raise ValueError("Please set the environment variable 'DATASETS'. Use 'export DATASETS=/path/to/datasets'")
-if 'RESULTS' not in os.environ:
-    raise ValueError("Please set the environment variable 'RESULTS'. Use 'export RESULTS=/path/to/results'")
+    os.environ['DATASETS'] = str(_REPO_ROOT / 'datasets')
+    os.environ.setdefault('EOSS_SKIP_CHECKSUM', '1')
+os.environ.setdefault('RESULTS', str(_REPO_ROOT / 'results'))
 
 DATASET_FOLDER = Path(os.environ.get('DATASETS')).expanduser()
 RES_FOLDER = Path(os.environ.get('RESULTS')).expanduser()
@@ -32,10 +38,10 @@ RES_FOLDER = Path(os.environ.get('RESULTS')).expanduser()
 # =============================================
 
 # --- Training ---
-batch_size         = 64        # mini-batch size
-steps              = 100_000     # total training steps (set to None if using epochs)
+batch_size         = 128       # mini-batch size
+steps              = 20_000      # total training steps (set to None if using epochs)
 epochs             = None      # total epochs (set to None if using steps; cannot set both)
-lr                 = 0.005      # learning rate
+lr                 = 0.01       # learning rate
 optimizer_name     = 'SGD'     # 'SGD' | 'SGD-Momentum' | 'SGD-Nesterov' | 'Adam'
 optimizer_params   = {}
 # Optimizer params examples:
@@ -44,38 +50,37 @@ optimizer_params   = {}
 #   SGD-Nesterov: {'beta': 0.9}
 #   Adam:         {'beta1': 0.9, 'beta2': 0.999, 'eps': 1e-8}  (all optional, these are defaults)
 
-probe_samples      = 128       # number of probe batches for batch_sharpness and probe GBS
-stop_loss          = 0.00001      # early-stop when loss drops below this; None = disabled
-gpu                = 0         # which GPU to use (0 or 1); None = default; 'cpu' = force CPU
-results_subfolder  = '0318_alloptimizers_targeted_finebatch'      # save inside RES_FOLDER/results_subfolder/; None = RES_FOLDER directly
+probe_samples      = 8         # number of probe batches for batch_sharpness and probe GBS
+stop_loss          = None      # early-stop when loss drops below this; None = disabled
+gpu                = 'cpu'     # which GPU to use (0 or 1); None = default; 'cpu' = force CPU
+results_subfolder  = 'local_cpu_test'      # save inside RES_FOLDER/results_subfolder/; None = RES_FOLDER directly
 
 # --- Loss ---
-loss_type          = 'mse'     # 'mse' (SquaredLoss) | 'ce' (CrossEntropyLoss) | 'logistic' (LogisticLoss; SST {-1,+1})
+loss_type          = 'mse'     # 'mse' (SquaredLoss) | 'ce' (CrossEntropyLoss)
 label_smoothing    = 0.0       # only used for loss_type='ce'; bounds logits so CE keeps a finite min / sustained EoS plateau
 
 # --- Dataset ---
-dataset            = 'cifar10' # 'cifar10' | 'cifar10_2cls' | 'cifar10_ez' | 'svhn' | 'fmnist' | 'cinic10' | 'imagenet32' | 'sst2' | 'qwen_sst2'
-num_data           = 8192      # number of training samples to use
+dataset            = 'cifar10' # 'cifar10' | 'cifar10_2cls' | 'cifar10_ez' | 'svhn' | 'fmnist' | 'cinic10' | 'imagenet32'
+num_data           = 2048      # number of training samples to use
 
 # --- Model ---
-model              = 'mlp'     # 'mlp' | 'mlp2' | 'mlp3' | 'mlp_s' | 'mlp_l' | 'mlp_silu' | 'mlp_tanh' | 'linear' | 'cnn' | 'resnet' | 'resnet_bn' | 'wrn' | 'wrn_no_bn' | 'vit' | 'sst_transformer' | 'qwen_classifier'
+model              = 'mlp_tiny' # 'mlp' | 'mlp2' | 'mlp3' | 'mlp_s' | 'mlp_l' | 'mlp_tiny' | 'mlp_silu' | 'mlp_tanh' | 'linear' | 'cnn' | 'resnet' | 'resnet_bn' | 'wrn' | 'wrn_no_bn'
 init_scale         = 0.2       # weight initialization scale
 no_init            = False     # True = skip custom weight initialization
-qwen_model_path    = '/n/holylabs/LABS/kdbrantley_lab/Lab/mwalden/models/Qwen2.5-0.5B-Instruct'  # local HF model dir for qwen_classifier
 
 # --- Measurements (True/False to enable/disable) ---
 full_loss_every    = 32
 
-batch_sharpness             = True      # E[gHg/g^2] averaged over probe_samples mini-batches
+batch_sharpness             = False     # E[gHg/g^2] averaged over probe_samples mini-batches
 batch_sharpness_every       = 256
 
 compute_probe_batch         = True    # compute A, B, GBS_out averaged over probe_samples batches
-compute_probe_batch_every   = 256   # probe-batch GBS + batch_sharpness every N steps
-power_iters                 = 50    # power iteration steps to find per-batch top eigenvector u
+compute_probe_batch_every   = 100   # probe-batch GBS + batch_sharpness every N steps
+power_iters                 = 15    # power iteration steps to find per-batch top eigenvector u
 
-compute_distributions       = True  # save per-probe-batch arrays of ||g||, ||s||, g·s, s·u, g·u
+compute_distributions       = False  # save per-probe-batch arrays of ||g||, ||s||, g·s, s·u, g·u
 
-compute_quantities_with_uB  = False  # False = skip per-batch power iteration + A_u/B_u/GBS_u/s_dot_u/g_dot_u
+compute_quantities_with_uB  = True  # False = skip per-batch power iteration + A_u/B_u/GBS_u/s_dot_u/g_dot_u
 
 # --- Additional measurements ---
 step_sharpness     = False     # single-batch Rayleigh quotient gHg/g^2
@@ -93,8 +98,8 @@ measurement_batch_size_cap = None  # cap second-order measurement batches; None 
 # --- Projection histogram tracking ---
 # Set both to enable tracking of <theta_t, v> projections at the edge of stability.
 # CLI: python config.py --track_from 5000 --track_until 6000
-track_from          = 20000    # step to start recording projections (None = disabled)
-track_until         = 30000    # step to stop recording projections (None = disabled)
+track_from          = None     # step to start recording projections (None = disabled)
+track_until         = None     # step to stop recording projections (None = disabled)
 fixed_u             = False    # True = fix top Hessian eigenvec at track_from and reuse
 projection_save_every = 100    # flush projections.npz every N tracked steps (0 = only at end)
 track_stride        = 10       # record every Nth step within [track_from, track_until]
@@ -148,27 +153,6 @@ while _i < len(_args):
     else:
         _i += 1
 
-if model == 'vit':
-    if 'no_init' not in _overridden_keys:
-        no_init = True
-    if 'measurement_batch_size_cap' not in _overridden_keys:
-        measurement_batch_size_cap = 128
-
-if model == 'sst_transformer':
-    # Init handled inside SSTTransformer.__init__ (head zero-init, embeddings frozen);
-    # initialize_net's branch is a no-op, so init_scale does not apply.
-    if 'measurement_batch_size_cap' not in _overridden_keys:
-        measurement_batch_size_cap = 128
-
-if model == 'qwen_classifier':
-    # Head zero-init + frozen embeddings handled inside QwenClassifier.__init__;
-    # initialize_net is a no-op for this model type.
-    if 'no_init' not in _overridden_keys:
-        no_init = True
-    # Cap second-order measurement batches to avoid OOM on 0.5B model
-    if 'measurement_batch_size_cap' not in _overridden_keys:
-        measurement_batch_size_cap = 64
-
 
 # =============================================
 # EVERYTHING BELOW RUNS THE EXPERIMENT
@@ -221,20 +205,20 @@ if __name__ == '__main__':
         loss_fn = SquaredLoss()
     elif loss_type == 'ce':
         loss_fn = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-    elif loss_type == 'logistic':
-        from utils.nets import LogisticLoss
-        loss_fn = LogisticLoss()
+
+    if os.environ.get('EOSS_SKIP_CHECKSUM'):
+        # Local CPU smoke-testing: lets you point DATASETS at CIFAR-10 files
+        # fetched from a mirror other than the official host (whose MD5s
+        # torchvision hardcodes), e.g. when the official host is unreachable.
+        import torchvision.datasets.cifar as _cifar_mod
+        _cifar_mod.check_integrity = lambda *a, **k: True
 
     # ----- Dataset and Model -----
     dataset_presets = get_dataset_presets()
     model_presets = get_model_presets()
 
-    if model == 'qwen_classifier':
-        model_presets['qwen_classifier']['params']['model_path'] = qwen_model_path
-
     data = prepare_dataset(dataset, DATASET_FOLDER, num_data, [], dataset_seed,
-                           loss_type=loss_type,
-                           tokenizer_path=qwen_model_path if model == 'qwen_classifier' else None)
+                           loss_type=loss_type)
 
     params = model_presets[model]['params']
     params['input_dim'] = dataset_presets[dataset]['input_dim']
