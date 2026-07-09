@@ -1,437 +1,241 @@
-# %% Settings
-import os
-from pathlib import Path
-import pandas as pd
+"""
+Regime map: everything parameterized by R.
+
+The organizing claim of this project is that a single dimensionless control parameter
+    R = (optimizer state-memory 1/(1-beta)) / (unstable-direction rotation time tau_rot)
+decides whether a cell is MARGINAL (at its edge, R<~1) or METASTABLE (sub-edge damped
+basin, R>>1). If that's right, then every per-cell diagnostic should collapse onto a
+function of R alone -- regardless of whether R was moved by changing batch size or beta.
+
+This script reads the comprehensive SGD-Momentum sweep (results/comprehensive_sweep/<cell>/
+meta.json, one cell per (batch, beta, lr)) and scatters each diagnostic against R, with the
+marginal/metastable regions shaded and the R=1 crossover marked. Color = batch, marker = beta,
+so you can eyeball the collapse: do points at the same R land at the same y no matter how they
+got there?
+
+Figure 1 (regime_map.png): 3x3 grid of diagnostics vs R.
+Figure 2 (frozen_cocycle.png): the frozen-cocycle marginality certificate gamma_K(c) -- where
+    the closed-loop Lyapunov crosses zero (c*~1 <=> marginal). Separate, sparser run; small-batch
+    cells are oscillation-confounded (gamma<0 even for marginal SGD_b8), so this is a large-batch
+    certificate, complementary to the per-cell perturb-relax gamma in Figure 1.
+
+Usage:
+    python plot.py                      # reads results/comprehensive_sweep, writes results/plots/
+    python plot.py --sweep_dir DIR --out DIR
+"""
+import os, sys, json, glob, argparse
 import numpy as np
-from matplotlib import pyplot as plt
-from utils.storage import parse_folder_name
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
-RESULTS_ROOT = Path("results/0318_alloptimizers_targeted_finebatch")
-WINDOW = None  # EMA alpha for smoothing (float in (0,1]) or None
+_REPO = os.path.dirname(os.path.abspath(__file__))
 
-# Filter runs: only plot runs matching ALL key-value pairs.
-# FILTER = {'optimizer_name': 'SGD', 'lr': 0.007}
-FILTER = {'optimizer_name': 'SGD-Momentum', 'lr': 0.004}
-# FILTER = {'optimizer_name': 'SGD-Nesterov', 'lr': 0.004}
-# FILTER = {'optimizer_name': 'Adam', 'lr': 1e-3}
-# FILTER = {'optimizer_name': 'Muon', 'lr': 0.002}
 
-def _matches_filter(folder_name, filt):
-    if not filt:
-        return True
-    parsed = parse_folder_name(folder_name)
-    return all(parsed.get(k) == v for k, v in filt.items())
-
-def _filter_title(base, filt):
-    if not filt:
-        return base
-    parts = ', '.join(f'{k}={v}' for k, v in filt.items())
-    return f'{base} ({parts})'
-
-def _ema(series, alpha):
-    """Exponential moving average with given alpha, ignoring NaNs."""
-    if alpha is None:
-        return series
-    result = series.copy().astype(float)
-    s = None
-    for i, v in enumerate(series):
-        if pd.isna(v):
-            result.iloc[i] = float('nan') if s is None else s
-            continue
-        s = v if s is None else (1 - alpha) * s + alpha * v
-        result.iloc[i] = s
-    return result
-
-def _smooth_probe(series):
-    return _ema(series, WINDOW)
-
-# Load all matching runs once
-_runs = []
-_run_folders = []
-for run_folder in sorted(RESULTS_ROOT.iterdir()):
-    if not run_folder.is_dir():
-        continue
-    if not _matches_filter(run_folder.name, FILTER):
-        continue
-    results_file = run_folder / 'results.txt'
-    if not results_file.exists():
-        continue
+def _f(x):
+    """None/missing -> nan, else float."""
     try:
-        run_df = pd.read_csv(results_file, comment='#')
-    except Exception:
-        continue
-    parsed = parse_folder_name(run_folder.name)
-    _runs.append((parsed, run_df))
-    _run_folders.append(run_folder)
+        return float(x) if x is not None else np.nan
+    except (TypeError, ValueError):
+        return np.nan
 
-order = sorted(range(len(_runs)), key=lambda i: _runs[i][0].get('lr', 0))
-_runs = [_runs[i] for i in order]
-_run_folders = [_run_folders[i] for i in order]
 
-figsize = (8, 5)
-
-def _run_label(parsed):
-    opt = parsed.get('optimizer_name', '?')
-    lr = parsed.get('lr', '?')
-    bs = parsed.get('batch_size', '?')
-    lr_str = f"{lr:g}" if isinstance(lr, float) else str(lr)
-    return f"{opt} lr={lr_str} b={bs}"
-
-def _has_data(run_df, col):
-    return col in run_df.columns and run_df[col].notna().any()
-
-def _build_color_map(color_by):
-    """Return {value: color} for all runs, keyed by batch_size or lr."""
-    key = 'batch_size' if color_by == 'BATCHSIZE' else 'lr'
-    vals = sorted(set(p.get(key) for p, _ in _runs if p.get(key) is not None))
-    cmap = plt.get_cmap('tab10')
-    return {v: cmap(i % 10) for i, v in enumerate(vals)}, key
-
-def _gbs_series(run_df, gbs_col, a_col, b_col, gbs_mode):
-    """Return (steps, values) for a GBS variant."""
-    if gbs_mode == 'outside':
-        if not _has_data(run_df, gbs_col):
-            return None
-        data = run_df[['step', gbs_col]].dropna()
-        return data['step'], data[gbs_col]
-    else:  # inside: B / -A
-        needed = ['step', a_col, b_col]
-        if not all(c in run_df.columns for c in needed):
-            return None
-        data = run_df[needed].dropna()
-        if data.empty:
-            return None
-        values = data[b_col] / (-data[a_col])
-        return data['step'], values
-
-def _plot_gbs(gbs_col, a_col, b_col, ylabel, title, *, gbs_mode, color_by):
-    color_map, color_key = _build_color_map(color_by)
-    mode_label = 'outside' if gbs_mode == 'outside' else 'inside (B/-A)'
-    color_label = 'batch size' if color_by == 'BATCHSIZE' else 'lr'
-    fig, ax = plt.subplots(figsize=figsize)
-    seen = set()
-    for parsed, run_df in _runs:
-        result = _gbs_series(run_df, gbs_col, a_col, b_col, gbs_mode)
-        if result is None:
+def load_cells(sweep_dir):
+    """Read every cell's meta.json into a list of flat dicts. Skips diverged / unfinished."""
+    rows = []
+    for meta_path in sorted(glob.glob(os.path.join(sweep_dir, "b*_beta*", "meta.json"))):
+        try:
+            m = json.load(open(meta_path))
+        except (json.JSONDecodeError, OSError):
             continue
-        steps, values = result
-        val = parsed.get(color_key)
-        color = color_map.get(val, 'gray')
-        val_str = f"{val:g}" if isinstance(val, float) else str(val)
-        lbl = f"{color_label}={val_str}" if val not in seen else None
-        seen.add(val)
-        ax.scatter(steps, _smooth_probe(values), marker='o', s=4, color=color, label=lbl)
-    ax.set_xlabel('step')
-    ax.set_ylabel(ylabel)
-    ax.set_ylim(-1, 5)
-    ax.set_title(_filter_title(f'{title} [{mode_label}, color={color_label}]', FILTER))
-    ax.legend()
-    plt.tight_layout()
-    return fig, ax
-
-def _plot_generic(col, ylabel, title, *, color_by, yscale='linear'):
-    color_map, color_key = _build_color_map(color_by)
-    color_label = 'batch size' if color_by == 'BATCHSIZE' else 'lr'
-    fig, ax = plt.subplots(figsize=figsize)
-    seen = set()
-    for parsed, run_df in _runs:
-        if not _has_data(run_df, col):
-            continue
-        data = run_df[['step', col]].dropna()
-        val = parsed.get(color_key)
-        color = color_map.get(val, 'gray')
-        val_str = f"{val:g}" if isinstance(val, float) else str(val)
-        lbl = f"{color_label}={val_str}" if val not in seen else None
-        seen.add(val)
-        ax.scatter(data['step'], _smooth_probe(data[col]), marker='o', s=4, color=color, label=lbl)
-    ax.set_yscale(yscale)
-    ax.set_xlabel('step')
-    ax.set_ylabel(ylabel)
-    ax.set_title(_filter_title(f'{title} [color={color_label}]', FILTER))
-    ax.legend()
-    plt.tight_layout()
-    return fig, ax
-
-def _plot_dist_mean(quantity_fn, ylabel, title, *, color_by):
-    """Plot mean of a per-probe-batch quantity from distributions.npz over time."""
-    color_map, color_key = _build_color_map(color_by)
-    color_label = 'batch size' if color_by == 'BATCHSIZE' else 'lr'
-    fig, ax = plt.subplots(figsize=figsize)
-    seen = set()
-    for i, (parsed, _) in enumerate(_runs):
-        dfile = _run_folders[i] / 'distributions.npz'
-        if not dfile.exists():
-            continue
-        d = np.load(dfile)
-        steps = d['steps']
-        vals = quantity_fn(d).mean(axis=1)
-        val = parsed.get(color_key)
-        color = color_map.get(val, 'gray')
-        val_str = f"{val:g}" if isinstance(val, float) else str(val)
-        lbl = f"{color_label}={val_str}" if val not in seen else None
-        seen.add(val)
-        ax.scatter(steps, _smooth_probe(pd.Series(vals)), marker='o', s=4, color=color, label=lbl)
-    ax.set_xlabel('step')
-    ax.set_ylabel(ylabel)
-    ax.set_title(_filter_title(title, FILTER))
-    ax.legend()
-    plt.tight_layout()
-    return fig, ax
-
-# %% Plot 1: GBS
-GBS_MODE = 'outside'   # 'outside' or 'inside'
-COLOR_BY = 'BATCHSIZE' # 'BATCHSIZE' or 'LEARNINGRATE'
-fig, ax = _plot_gbs('GBS', 'A', 'B', 'GBS', 'GBS', gbs_mode=GBS_MODE, color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 2: GBS_u (per-batch top eigenvector)
-GBS_MODE = 'inside'
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_gbs('GBS_u', 'A_u', 'B_u', 'GBS_u', 'GBS_u', gbs_mode=GBS_MODE, color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 3: GBS_ufull (full-batch eigenvector)
-GBS_MODE = 'inside'
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_gbs('GBS_ufull', 'A_ufull', 'B_ufull', 'GBS_ufull', 'GBS_ufull', gbs_mode=GBS_MODE, color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 4: GBS_g (gradient direction)
-GBS_MODE = 'outside'
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_gbs('GBS_g', 'A_g', 'B_g', 'GBS_g', 'GBS_g', gbs_mode=GBS_MODE, color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 5: Batch sharpness
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_generic('batch_sharpness', 'batch sharpness', 'Batch Sharpness', color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 6: SBS (E[sHs/||s||^2])
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_generic('SBS', 'SBS', 'SBS = E[sHs/‖s‖²]', color_by=COLOR_BY)
-# ax.set_ylim(-0.5, 1)
-plt.show()
-
-# %% Plot 7: Full-batch loss
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_generic('full_loss', 'loss', 'Full-batch Loss', color_by=COLOR_BY, yscale='log')
-plt.show()
-
-# %% Plot 8: mean cos(s, g) over time
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_dist_mean(lambda d: d['g_dot_s'] / (d['gnorms'] * d['snorms']), 'E[cos(s,g)]', 'Mean cos(s, g)', color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 9: E[cos(s, u)]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_dist_mean(lambda d: d['s_dot_u'] / d['snorms'], 'E[cos(s,u)]', 'Mean cos(s, u)', color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 10: E[cos(g, u)]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_dist_mean(lambda d: d['g_dot_u'] / d['gnorms'], 'E[cos(g,u)]', 'Mean cos(g, u)', color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 11: E[cos(s, g_full)]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_dist_mean(lambda d: d['s_dot_gfull'] / (d['snorms'] * d['gnorm_full'][:, None]), 'E[cos(s,g_full)]', 'Mean cos(s, g_full)', color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 12: E[cos(s, u_full)]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_dist_mean(lambda d: d['s_dot_ufull'] / d['snorms'], 'E[cos(s,u_full)]', 'Mean cos(s, u_full)', color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 13: E[cos(g, g_full)]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_dist_mean(lambda d: d['g_dot_gfull'] / (d['gnorms'] * d['gnorm_full'][:, None]), 'E[cos(g,g_full)]', 'Mean cos(g, g_full)', color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 14: E[||s||^2]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_dist_mean(lambda d: d['snorms'] ** 2, 'E[‖s‖²]', 'Mean ‖s‖²', color_by=COLOR_BY)
-plt.show()
-
-# %% Plot 15: E[||g||^2]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_dist_mean(lambda d: d['gnorms'] ** 2, 'E[‖g‖²]', 'Mean ‖g‖²', color_by=COLOR_BY)
-plt.show()
-
-_GBS_AB_COLS = {
-    'GBS':       ('A',       'B'),
-    'GBS_u':     ('A_u',     'B_u'),
-    'GBS_g':     ('A_g',     'B_g'),
-    'GBS_ufull': ('A_ufull', 'B_ufull'),
-}
-
-def _plot_gbs_over_cos(gbs_col, cos_fn, cos_label, *, color_by, gbs_mode='outside'):
-    """Plot {gbs_col} / -mean_cos where cos_fn(d) returns the (N,128) cosine array."""
-    color_map, color_key = _build_color_map(color_by)
-    color_label = 'batch size' if color_by == 'BATCHSIZE' else 'lr'
-    mode_label = 'outside' if gbs_mode == 'outside' else 'inside (B/-A)'
-    fig, ax = plt.subplots(figsize=figsize)
-    seen = set()
-    for i, (parsed, run_df) in enumerate(_runs):
-        dfile = _run_folders[i] / 'distributions.npz'
-        if not dfile.exists():
-            continue
-        d = np.load(dfile)
-        mean_cos = cos_fn(d).mean(axis=1)
-        if gbs_mode == 'outside':
-            csv_df = run_df[['step', gbs_col]].dropna()
-            merged = pd.DataFrame({'step': d['steps'], 'mean_cos': mean_cos})
-            merged = merged.merge(csv_df, on='step', how='inner')
-            if merged.empty:
+        if m.get("diverged") or m.get("status") not in (None, "ok", "done", "completed"):
+            # keep only clean, completed cells; 'status' may be absent in older meta
+            if m.get("diverged"):
                 continue
-            gbs_vals = merged[gbs_col].values
-        else:
-            a_col, b_col = _GBS_AB_COLS[gbs_col]
-            csv_df = run_df[['step', a_col, b_col]].dropna()
-            merged = pd.DataFrame({'step': d['steps'], 'mean_cos': mean_cos})
-            merged = merged.merge(csv_df, on='step', how='inner')
-            if merged.empty:
-                continue
-            gbs_vals = merged[b_col].values / (-merged[a_col].values)
-        ratio = gbs_vals / (-merged['mean_cos'].values)
-        val = parsed.get(color_key)
-        color = color_map.get(val, 'gray')
-        val_str = f"{val:g}" if isinstance(val, float) else str(val)
-        lbl = f"{color_label}={val_str}" if val not in seen else None
-        seen.add(val)
-        ax.scatter(merged['step'], ratio, marker='o', s=4, color=color, label=lbl)
-    ax.set_xlabel('step')
-    ax.set_ylabel(f'{gbs_col} / -mean {cos_label}')
-    ax.set_title(_filter_title(f'{gbs_col} / -mean {cos_label} [{mode_label}]', FILTER))
-    ax.legend()
-    plt.tight_layout()
-    return fig, ax
+        R = _f(m.get("plateau_R"))
+        if not np.isfinite(R) or R <= 0:
+            continue
+        rows.append(dict(
+            tag=m.get("tag"), B=int(m["B"]), beta=float(m["beta"]),
+            lr=_f(m.get("lr")), lr_index=m.get("lr_index"),
+            R=R,
+            gbs=_f(m.get("plateau_gbs")),
+            kappa=_f(m.get("plateau_kappa")),
+            cos_buf_uB=_f(m.get("plateau_cos_buf_uB")),
+            gamma_proj=_f(m.get("perturb_gamma_proj_mean")),
+            gamma_proj_std=_f(m.get("perturb_gamma_proj_std")),
+            gamma_full=_f(m.get("perturb_gamma_full_mean")),
+            sharpen=_f(m.get("sharpen_net_rise_mean")),
+            sharpen_std=_f(m.get("sharpen_net_rise_std")),
+            interpolated=bool(m.get("sharpen_interpolated")),
+            kurt=_f(m.get("catapult_kurtosis")),
+            p99_p50=_f(m.get("catapult_p99_p50")),
+            hill=_f(m.get("catapult_hill")),
+        ))
+    return rows
 
-# %% Plot 16: GBS_g / -mean cos(s_B, g_B)
-GBS_MODE = 'inside'
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_gbs_over_cos('GBS_g',
-    lambda d: d['g_dot_s'] / (d['gnorms'] * d['snorms']),
-    'cos(s_B, g_B)', color_by=COLOR_BY, gbs_mode=GBS_MODE)
-ax.set_ylim(-1,8)
-plt.show()
 
-# %% Plot 17: GBS_g / -mean cos(s_B, g_full)
-GBS_MODE = 'inside'
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_gbs_over_cos('GBS_g',
-    lambda d: d['s_dot_gfull'] / (d['snorms'] * d['gnorm_full'][:, None]),
-    'cos(s_B, g_full)', color_by=COLOR_BY, gbs_mode=GBS_MODE)
-ax.set_ylim(-1,8)
-plt.show()
-
-# %% Plot 18: GBS_g / -mean cos(g_B, g_full)
-GBS_MODE = 'inside'
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_gbs_over_cos('GBS_g',
-    lambda d: d['g_dot_gfull'] / (d['gnorms'] * d['gnorm_full'][:, None]),
-    'cos(g_B, g_full)', color_by=COLOR_BY, gbs_mode=GBS_MODE)
-ax.set_ylim(-5,2)
-plt.show()
-
-# %% Plot 19: GBS / -mean cos(s_B, g_B)
-GBS_MODE = 'inside'
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_gbs_over_cos('GBS',
-    lambda d: d['g_dot_s'] / (d['gnorms'] * d['snorms']),
-    'cos(s_B, g_B)', color_by=COLOR_BY, gbs_mode=GBS_MODE)
-ax.set_ylim(-1,5)
-plt.show()
-
-# %% Plot 20: GBS / -mean cos(s_B, g_full)
-GBS_MODE = 'inside'
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_gbs_over_cos('GBS',
-    lambda d: d['s_dot_gfull'] / (d['snorms'] * d['gnorm_full'][:, None]),
-    'cos(s_B, g_full)', color_by=COLOR_BY, gbs_mode=GBS_MODE)
-ax.set_ylim(-1,8)
-plt.show()
-
-# %% Plot 21: GBS / -mean cos(g_B, g_full)
-GBS_MODE = 'inside'
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_gbs_over_cos('GBS',
-    lambda d: d['g_dot_gfull'] / (d['gnorms'] * d['gnorm_full'][:, None]),
-    'cos(g_B, g_full)', color_by=COLOR_BY, gbs_mode=GBS_MODE)
-# ax.set_ylim(...)
-plt.show()
-
-# %% Plot 23: GBS_cos_sBgB = E[sHs / (-gs |cos(s_B, g_B)|)]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_generic('GBS_cos_sBgB', 'GBS_cos_sBgB', 'GBS_cos_sBgB = E[sHs / (-gs|cos(s,g)|)]', color_by=COLOR_BY)
-ax.set_ylim(-1, 8)
-plt.show()
-
-# %% Plot 24: GBS_cos_sBgfull = E[sHs / (-gs |cos(s_B, g_full)|)]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_generic('GBS_cos_sBgfull', 'GBS_cos_sBgfull', 'GBS_cos_sBgfull = E[sHs / (-gs|cos(s,g_full)|)]', color_by=COLOR_BY)
-ax.set_ylim(-1, 8)
-plt.show()
-
-# %% Plot 25: GBS_cos_gBgfull = E[sHs / (-gs |cos(g_B, g_full)|)]
-COLOR_BY = 'BATCHSIZE'
-fig, ax = _plot_generic('GBS_cos_gBgfull', 'GBS_cos_gBgfull', 'GBS_cos_gBgfull = E[sHs / (-gs|cos(g,g_full)|)]', color_by=COLOR_BY)
-ax.set_ylim(-1,8)
-plt.show()
-
-# %% Plot 26: cos(s, g) distribution over time (Plotly animated histogram)
-import plotly.graph_objects as go
-
-DIST_FILTER = {'lr': 0.008, 'batch_size': 8}  # filter within already-loaded _runs
-
-def _find_dist_run(filt):
-    for i, (parsed, _) in enumerate(_runs):
-        if all(parsed.get(k) == v for k, v in filt.items()):
-            return i
-    raise ValueError(f"No run matched DIST_FILTER={filt}. Available: {[p for p,_ in _runs]}")
-
-_dist_idx  = _find_dist_run(DIST_FILTER)
-_dist_file = _run_folders[_dist_idx] / 'distributions.npz'
-_dist = np.load(_dist_file)
-
-_dist_steps = _dist['steps']
-_cos_sg     = _dist['g_dot_s'] / (_dist['gnorms'] * _dist['snorms'])  # (N, 128)
-_mean_cos   = _cos_sg.mean(axis=1)                                     # (N,)
-
-print(f"Run: {_run_folders[_dist_idx].name}")
-print(f"Steps recorded: {_dist_steps}")
-print(f"mean cos(s,g) per step:\n{_mean_cos}")
-
-_xmin, _xmax = -1.0, 1.0
-_frames = [
-    go.Frame(
-        data=[go.Histogram(x=_cos_sg[i].tolist(), xbins=dict(start=_xmin, end=_xmax, size=(_xmax - _xmin) / 40))],
-        name=str(int(_dist_steps[i])),
-    )
-    for i in range(len(_dist_steps))
+# (key, y-label, horizontal reference line or None, yscale, ylim)
+PANELS = [
+    ("gbs",        "GBS  (edge = 2)",                    2.0,  "linear", (-0.5, 3.2)),
+    ("kappa",      r"$\kappa=\eta\lambda$  (edge frac.)", None, "linear", None),
+    ("cos_buf_uB", r"cos(buffer, $u_B$)  (tracking)",    None, "linear", None),
+    ("gamma_proj", r"$\gamma_{relax}$ proj  (kick decay)", 0.0, "linear", None),
+    ("gamma_full", r"$\gamma_{relax}$ full-space",        0.0, "linear", None),
+    ("sharpen",    "sharpening net rise\n(boundary binding?)", 0.0, "linear", None),
+    ("kurt",       "catapult kurtosis",                  None, "symlog", None),
+    ("p99_p50",    "catapult p99/p50",                   None, "symlog", None),
+    ("hill",       r"catapult Hill $\alpha$ (m.s. bd = 2)", 2.0, "linear", None),
 ]
 
-_fig26 = go.Figure(
-    data=[go.Histogram(x=_cos_sg[0].tolist(), xbins=dict(start=_xmin, end=_xmax, size=(_xmax - _xmin) / 40))],
-    frames=_frames,
-    layout=go.Layout(
-        title=f'cos(s, g) distribution over time — {_run_folders[_dist_idx].name}',
-        xaxis=dict(title='cos(s, g)', range=[_xmin, _xmax]),
-        yaxis_title='count',
-        sliders=[dict(
-            steps=[dict(method='animate', args=[[str(int(s))], dict(mode='immediate', frame=dict(duration=0))], label=str(int(s)))
-                   for s in _dist_steps],
-            currentvalue=dict(prefix='step: '),
-        )],
-        updatemenus=[dict(
-            type='buttons',
-            buttons=[
-                dict(label='Play',  method='animate', args=[None, dict(frame=dict(duration=300), fromcurrent=True)]),
-                dict(label='Pause', method='animate', args=[[None], dict(mode='immediate')]),
-            ],
-        )],
-    ),
-)
-_fig26.show()
+BETA_MARKERS = ["o", "s", "^", "D", "v", "P", "X"]
 
-# %%
+
+def shade_regimes(ax, xlo, xhi):
+    """Green = marginal (R<1), orange = metastable (R>1), dashed line at R=1."""
+    ax.axvspan(xlo, 1.0, color="#2ca02c", alpha=0.07, zorder=0)
+    ax.axvspan(1.0, xhi, color="#ff7f0e", alpha=0.07, zorder=0)
+    ax.axvline(1.0, color="0.4", ls="--", lw=1, zorder=1)
+
+
+def fig_regime_map(rows, out_path):
+    if not rows:
+        print("[plot] no cells to plot yet"); return
+    batches = sorted({r["B"] for r in rows})
+    betas = sorted({r["beta"] for r in rows})
+    cmap = plt.cm.viridis(np.linspace(0, 0.92, len(batches)))
+    bcolor = {b: cmap[i] for i, b in enumerate(batches)}
+    bmarker = {be: BETA_MARKERS[i % len(BETA_MARKERS)] for i, be in enumerate(betas)}
+
+    Rall = np.array([r["R"] for r in rows])
+    xlo, xhi = Rall.min() * 0.6, Rall.max() * 1.7
+
+    fig, axes = plt.subplots(3, 3, figsize=(15, 12))
+    for ax, (key, ylabel, href, yscale, ylim) in zip(axes.flat, PANELS):
+        shade_regimes(ax, xlo, xhi)
+        n_clip = 0
+        for r in rows:
+            y = r[key]
+            if not np.isfinite(y):
+                continue
+            if ylim is not None and not (ylim[0] <= y <= ylim[1]):
+                n_clip += 1  # counted, drawn clipped at the axis edge below
+            # hollow marker for interpolated cells on the sharpening panel (confounded there)
+            face = "none" if (key == "sharpen" and r["interpolated"]) else bcolor[r["B"]]
+            ax.scatter(r["R"], y, s=46, marker=bmarker[r["beta"]],
+                       facecolors=face, edgecolors=bcolor[r["B"]], linewidths=1.3,
+                       alpha=0.9, zorder=3)
+            if key == "gamma_proj" and np.isfinite(r["gamma_proj_std"]):
+                ax.errorbar(r["R"], y, yerr=r["gamma_proj_std"], fmt="none",
+                            ecolor=bcolor[r["B"]], alpha=0.35, capsize=2, zorder=2)
+        if href is not None:
+            ax.axhline(href, color="crimson", ls=":", lw=1.2, zorder=1)
+        ax.set_xscale("log")
+        ax.set_yscale(yscale)
+        ax.set_xlim(xlo, xhi)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+            if n_clip:
+                ax.text(0.98, 0.02, f"{n_clip} off-scale", transform=ax.transAxes,
+                        fontsize=7, color="0.4", ha="right", va="bottom")
+        ax.set_xlabel("R  =  buffer memory / rotation time")
+        ax.set_ylabel(ylabel)
+        ax.grid(True, which="both", alpha=0.15)
+
+    # regime labels on the first panel
+    a0 = axes.flat[0]
+    ylim = a0.get_ylim()
+    yt = ylim[1] - 0.06 * (ylim[1] - ylim[0])
+    a0.text(np.sqrt(xlo * 1.0), yt, "MARGINAL", color="#1b6b1b", fontsize=10,
+            fontweight="bold", ha="center", va="top")
+    a0.text(np.sqrt(1.0 * xhi), yt, "METASTABLE", color="#b35900", fontsize=10,
+            fontweight="bold", ha="center", va="top")
+
+    # legends: batch (color) + beta (marker)
+    batch_handles = [Line2D([0], [0], marker="o", ls="none", mfc=bcolor[b], mec=bcolor[b],
+                            ms=9, label=f"b{b}") for b in batches]
+    beta_handles = [Line2D([0], [0], marker=bmarker[be], ls="none", mfc="0.35", mec="0.35",
+                           ms=8, label=fr"$\beta$={be}") for be in betas]
+    hollow = [Line2D([0], [0], marker="s", ls="none", mfc="none", mec="0.35", ms=8,
+                     label="interpolated\n(sharpen panel)")]
+    leg1 = fig.legend(handles=batch_handles, title="batch (color)", loc="upper left",
+                      bbox_to_anchor=(0.005, 0.995), fontsize=9, framealpha=0.9)
+    fig.add_artist(leg1)
+    fig.legend(handles=beta_handles + hollow, title=r"$\beta$ (marker)", loc="upper right",
+               bbox_to_anchor=(0.995, 0.995), fontsize=9, framealpha=0.9)
+
+    fig.suptitle("Regime map — every diagnostic vs the control parameter R\n"
+                 f"({len(rows)} cells; color=batch, marker=$\\beta$; collapse onto R "
+                 "⇒ R is the control parameter)", fontsize=13, y=1.0)
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.955))
+    fig.savefig(out_path, dpi=140, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[plot] wrote {out_path}  ({len(rows)} cells)")
+
+
+def fig_frozen_cocycle(out_path):
+    """Companion: the frozen-cocycle certificate gamma_K(c). c*~1 (zero crossing) <=> marginal."""
+    jp = os.path.join(_REPO, "results", "frozen_cocycle_v3", "frozen_cocycle_v3.json")
+    if not os.path.exists(jp):
+        print("[plot] no frozen_cocycle_v3.json; skipping Fig 2"); return
+    cells = json.load(open(jp))
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.axhline(0.0, color="0.3", lw=1)
+    ax.axvline(1.0, color="0.6", ls="--", lw=1, label="c=1 (operating point)")
+    colors = plt.cm.plasma(np.linspace(0, 0.85, len(cells)))
+    for cell, col in zip(cells, colors):
+        c = np.array(cell.get("c_grid", []), float)
+        g = np.array(cell.get("gammaK_raw", []), float)
+        if len(c) != len(g) or len(c) == 0:
+            continue
+        ax.plot(c, g, "-o", color=col, ms=4, label=cell.get("tag", "?"))
+        # mark zero-crossing c* if one exists
+        s = np.sign(g)
+        idx = np.where(np.diff(s) != 0)[0]
+        for i in idx:
+            cstar = c[i] - g[i] * (c[i + 1] - c[i]) / (g[i + 1] - g[i])
+            ax.plot(cstar, 0, "*", color=col, ms=14, mec="k", mew=0.5, zorder=5)
+    ax.set_xlabel("lr multiplier  c")
+    ax.set_ylabel(r"frozen-cocycle top Lyapunov  $\gamma_K(c)$")
+    ax.set_title("Marginality certificate: $\\gamma_K(c^\\ast)=0$ at $c^\\ast\\!\\approx\\!1$ ⇒ marginal\n"
+                 "(★ = zero crossing; small-batch cells oscillation-confounded, "
+                 "large-batch cells are the clean certificate)", fontsize=11)
+    ax.grid(True, alpha=0.2)
+    ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=140)
+    plt.close(fig)
+    print(f"[plot] wrote {out_path}  ({len(cells)} frozen-cocycle cells)")
+
+
+def dump_table(rows, out_path):
+    """CSV of the aggregated per-cell scalars, sorted by R, for ad-hoc analysis."""
+    if not rows:
+        return
+    cols = ["tag", "B", "beta", "lr", "R", "gbs", "kappa", "cos_buf_uB",
+            "gamma_proj", "gamma_full", "sharpen", "interpolated", "kurt", "p99_p50", "hill"]
+    rows = sorted(rows, key=lambda r: r["R"])
+    with open(out_path, "w") as f:
+        f.write(",".join(cols) + "\n")
+        for r in rows:
+            f.write(",".join(str(r.get(c, "")) for c in cols) + "\n")
+    print(f"[plot] wrote {out_path}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sweep_dir", default=os.path.join(_REPO, "results", "comprehensive_sweep"))
+    ap.add_argument("--out", default=os.path.join(_REPO, "results", "plots"))
+    args = ap.parse_args()
+    os.makedirs(args.out, exist_ok=True)
+
+    rows = load_cells(args.sweep_dir)
+    print(f"[plot] loaded {len(rows)} clean cells from {args.sweep_dir}")
+    fig_regime_map(rows, os.path.join(args.out, "regime_map.png"))
+    fig_frozen_cocycle(os.path.join(args.out, "frozen_cocycle.png"))
+    dump_table(rows, os.path.join(args.out, "regime_table.csv"))
+
+
+if __name__ == "__main__":
+    main()
