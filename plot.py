@@ -26,6 +26,8 @@ Usage:
       force the headless Agg backend and skip the (blocking) window pop-ups.
     - Override dirs with env vars EOSS_SWEEP_DIR / EOSS_PLOT_OUT.
 """
+
+#%%
 import os, json, glob
 import numpy as np
 import matplotlib
@@ -48,25 +50,42 @@ def _f(x):
         return np.nan
 
 
-def load_cells(sweep_dir):
-    """Read every cell's meta.json into a list of flat dicts. Skips diverged / unfinished."""
-    rows = []
+def load_cells(sweep_dir, require_plateau=True):
+    """Read every cell's meta.json into a list of flat dicts.
+
+    VALIDITY GATE: a cell's diagnostics are only meaningful if the run reached a stationary
+    plateau (whatever value). We drop (a) diverged cells and (b) cells whose GBS trajectory
+    never stabilized -- typically the lowest-lr cells that burned the full step budget still
+    descending toward EoS. Set require_plateau=False to inspect the rejects. Returns
+    (rows, excluded) where `excluded` lists (tag, reason) for transparency.
+    """
+    rows, excluded = [], []
     for meta_path in sorted(glob.glob(os.path.join(sweep_dir, "b*_beta*", "meta.json"))):
         try:
             m = json.load(open(meta_path))
         except (json.JSONDecodeError, OSError):
             continue
-        if m.get("diverged") or m.get("status") not in (None, "ok", "done", "completed"):
-            # keep only clean, completed cells; 'status' may be absent in older meta
-            if m.get("diverged"):
-                continue
+        tag = m.get("tag")
+        if m.get("diverged"):
+            excluded.append((tag, "diverged")); continue
+        st = m.get("stationarity") or {}
+        stabilized = bool(st.get("stabilized"))
         R = _f(m.get("plateau_R"))
         if not np.isfinite(R) or R <= 0:
+            excluded.append((tag, "no R")); continue
+        if require_plateau and not stabilized:
+            excluded.append((tag, f"GBS not plateaued (drift={_f(st.get('drift_over_window')):.3f}, "
+                                  f"{m.get('steps_trained')}/{m.get('steps_max')} steps)"))
             continue
+        # Validity = GBS reached a stationary plateau (stabilized), at WHATEVER value. Loss is
+        # irrelevant: at EoS the loss keeps decreasing while lambda/GBS plateaus, so loss->0 is
+        # normal, not a disqualifier. `stationarity` in meta is computed on the GBS trajectory
+        # (plateau_mean == plateau_gbs), so `stabilized` is exactly the right gate.
         rows.append(dict(
-            tag=m.get("tag"), B=int(m["B"]), beta=float(m["beta"]),
+            tag=tag, B=int(m["B"]), beta=float(m["beta"]),
             lr=_f(m.get("lr")), lr_index=m.get("lr_index"),
-            R=R,
+            R=R, stabilized=stabilized,
+            drift=_f(st.get("drift_over_window")),
             gbs=_f(m.get("plateau_gbs")),
             kappa=_f(m.get("plateau_kappa")),
             cos_buf_uB=_f(m.get("plateau_cos_buf_uB")),
@@ -75,12 +94,11 @@ def load_cells(sweep_dir):
             gamma_full=_f(m.get("perturb_gamma_full_mean")),
             sharpen=_f(m.get("sharpen_net_rise_mean")),
             sharpen_std=_f(m.get("sharpen_net_rise_std")),
-            interpolated=bool(m.get("sharpen_interpolated")),
             kurt=_f(m.get("catapult_kurtosis")),
             p99_p50=_f(m.get("catapult_p99_p50")),
             hill=_f(m.get("catapult_hill")),
         ))
-    return rows
+    return rows, excluded
 
 
 # (key, y-label, horizontal reference line or None, yscale, ylim)
@@ -128,10 +146,8 @@ def fig_regime_map(rows, out_path):
                 continue
             if ylim is not None and not (ylim[0] <= y <= ylim[1]):
                 n_clip += 1  # counted, drawn clipped at the axis edge below
-            # hollow marker for interpolated cells on the sharpening panel (confounded there)
-            face = "none" if (key == "sharpen" and r["interpolated"]) else bcolor[r["B"]]
             ax.scatter(r["R"], y, s=46, marker=bmarker[r["beta"]],
-                       facecolors=face, edgecolors=bcolor[r["B"]], linewidths=1.3,
+                       facecolors=bcolor[r["B"]], edgecolors=bcolor[r["B"]], linewidths=1.3,
                        alpha=0.9, zorder=3)
             if key == "gamma_proj" and np.isfinite(r["gamma_proj_std"]):
                 ax.errorbar(r["R"], y, yerr=r["gamma_proj_std"], fmt="none",
@@ -164,12 +180,10 @@ def fig_regime_map(rows, out_path):
                             ms=9, label=f"b{b}") for b in batches]
     beta_handles = [Line2D([0], [0], marker=bmarker[be], ls="none", mfc="0.35", mec="0.35",
                            ms=8, label=fr"$\beta$={be}") for be in betas]
-    hollow = [Line2D([0], [0], marker="s", ls="none", mfc="none", mec="0.35", ms=8,
-                     label="interpolated\n(sharpen panel)")]
     leg1 = fig.legend(handles=batch_handles, title="batch (color)", loc="upper left",
                       bbox_to_anchor=(0.005, 0.995), fontsize=9, framealpha=0.9)
     fig.add_artist(leg1)
-    fig.legend(handles=beta_handles + hollow, title=r"$\beta$ (marker)", loc="upper right",
+    fig.legend(handles=beta_handles, title=r"$\beta$ (marker)", loc="upper right",
                bbox_to_anchor=(0.995, 0.995), fontsize=9, framealpha=0.9)
 
     fig.suptitle("Regime map — every diagnostic vs the control parameter R\n"
@@ -228,8 +242,8 @@ def dump_table(rows, out_path):
     """CSV of the aggregated per-cell scalars, sorted by R, for ad-hoc analysis."""
     if not rows:
         return
-    cols = ["tag", "B", "beta", "lr", "R", "gbs", "kappa", "cos_buf_uB",
-            "gamma_proj", "gamma_full", "sharpen", "interpolated", "kurt", "p99_p50", "hill"]
+    cols = ["tag", "B", "beta", "lr", "R", "stabilized", "drift", "gbs", "kappa", "cos_buf_uB",
+            "gamma_proj", "gamma_full", "sharpen", "kurt", "p99_p50", "hill"]
     rows = sorted(rows, key=lambda r: r["R"])
     with open(out_path, "w") as f:
         f.write(",".join(cols) + "\n")
@@ -242,8 +256,13 @@ def dump_table(rows, out_path):
 SWEEP_DIR = os.environ.get("EOSS_SWEEP_DIR", os.path.join(_REPO, "results", "comprehensive_sweep"))
 OUT_DIR = os.environ.get("EOSS_PLOT_OUT", os.path.join(_REPO, "results", "plots"))
 os.makedirs(OUT_DIR, exist_ok=True)
-rows = load_cells(SWEEP_DIR)
-print(f"[plot] loaded {len(rows)} clean cells from {SWEEP_DIR}")
+rows, excluded = load_cells(SWEEP_DIR)   # require_plateau=True: only GBS-stationary runs are valid
+print(f"[plot] {len(rows)} valid (GBS-plateaued) cells | {len(excluded)} excluded")
+_reasons = {}
+for _tag, _why in excluded:
+    _reasons.setdefault(_why.split(" (")[0], []).append(_tag)
+for _why, _tags in sorted(_reasons.items(), key=lambda kv: -len(kv[1])):
+    print(f"    excluded [{_why}]: {len(_tags)}  e.g. {', '.join(_tags[:4])}")
 
 # %% [Figure 1] — regime map: every diagnostic vs R (displays inline + saves PNG)
 fig1 = fig_regime_map(rows, os.path.join(OUT_DIR, "regime_map.png"))
