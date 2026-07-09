@@ -20,13 +20,20 @@ Figure 2 (frozen_cocycle.png): the frozen-cocycle marginality certificate gamma_
     certificate, complementary to the per-cell perturb-relax gamma in Figure 1.
 
 Usage:
-    python plot.py                      # reads results/comprehensive_sweep, writes results/plots/
-    python plot.py --sweep_dir DIR --out DIR
+    - Inline (Cursor/VS Code): run the `# %%` cells below one at a time; each figure is
+      displayed with plt.show() AND saved to results/plots/.
+    - Batch: `python plot.py` runs top-to-bottom, saves the PNGs; set EOSS_NO_SHOW=1 to
+      force the headless Agg backend and skip the (blocking) window pop-ups.
+    - Override dirs with env vars EOSS_SWEEP_DIR / EOSS_PLOT_OUT.
 """
-import os, sys, json, glob, argparse
+import os, json, glob
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")
+# Only force the non-interactive backend when explicitly headless; otherwise keep whatever
+# interactive backend the inline (#%%) kernel provides so plt.show() actually renders.
+SHOW = os.environ.get("EOSS_NO_SHOW") != "1"
+if not SHOW:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
@@ -170,8 +177,12 @@ def fig_regime_map(rows, out_path):
                  "⇒ R is the control parameter)", fontsize=13, y=1.0)
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.955))
     fig.savefig(out_path, dpi=140, bbox_inches="tight")
-    plt.close(fig)
     print(f"[plot] wrote {out_path}  ({len(rows)} cells)")
+    if SHOW:
+        plt.show()
+    else:
+        plt.close(fig)
+    return fig
 
 
 def fig_frozen_cocycle(out_path):
@@ -205,8 +216,12 @@ def fig_frozen_cocycle(out_path):
     ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
     fig.savefig(out_path, dpi=140)
-    plt.close(fig)
     print(f"[plot] wrote {out_path}  ({len(cells)} frozen-cocycle cells)")
+    if SHOW:
+        plt.show()
+    else:
+        plt.close(fig)
+    return fig
 
 
 def dump_table(rows, out_path):
@@ -223,19 +238,18 @@ def dump_table(rows, out_path):
     print(f"[plot] wrote {out_path}")
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--sweep_dir", default=os.path.join(_REPO, "results", "comprehensive_sweep"))
-    ap.add_argument("--out", default=os.path.join(_REPO, "results", "plots"))
-    args = ap.parse_args()
-    os.makedirs(args.out, exist_ok=True)
+# %% [setup] — run this cell first (loads the sweep)
+SWEEP_DIR = os.environ.get("EOSS_SWEEP_DIR", os.path.join(_REPO, "results", "comprehensive_sweep"))
+OUT_DIR = os.environ.get("EOSS_PLOT_OUT", os.path.join(_REPO, "results", "plots"))
+os.makedirs(OUT_DIR, exist_ok=True)
+rows = load_cells(SWEEP_DIR)
+print(f"[plot] loaded {len(rows)} clean cells from {SWEEP_DIR}")
 
-    rows = load_cells(args.sweep_dir)
-    print(f"[plot] loaded {len(rows)} clean cells from {args.sweep_dir}")
-    fig_regime_map(rows, os.path.join(args.out, "regime_map.png"))
-    fig_frozen_cocycle(os.path.join(args.out, "frozen_cocycle.png"))
-    dump_table(rows, os.path.join(args.out, "regime_table.csv"))
+# %% [Figure 1] — regime map: every diagnostic vs R (displays inline + saves PNG)
+fig1 = fig_regime_map(rows, os.path.join(OUT_DIR, "regime_map.png"))
 
+# %% [Figure 2] — frozen-cocycle marginality certificate (displays inline + saves PNG)
+fig2 = fig_frozen_cocycle(os.path.join(OUT_DIR, "frozen_cocycle.png"))
 
-if __name__ == "__main__":
-    main()
+# %% [table] — dump the per-cell scalars to CSV
+dump_table(rows, os.path.join(OUT_DIR, "regime_table.csv"))
