@@ -4,14 +4,28 @@ Everything is on the SLOW variable kappa_t (a scalar, no rotating coordinate) or
 series, over the plateau window (step >= warmup). Detrend kappa with a slow EMA so landscape
 drift doesn't confound the timescale statistics.
 
-  S1 burstiness : catapult inter-arrival (sigma-mu)/(sigma+mu). ~0 uniform (marginal, short-cycle
-                  feedback); ->1 clustered bursts (metastable, long-cycle basin). + catapult rate.
-  S2 tau_kappa  : AR(1) autocorrelation time of detrended kappa (steps). short = pinned/thermostat
-                  (marginal); long = wanders between catapults (metastable).
-  S3 restore    : slope of d kappa_{t+1} vs (kappa - mean). negative = restoring; report the
-                  from-above vs from-below asymmetry (marginal thermostat shaves from above fast).
-  S4 Elog_a     : E[log|a_t|] one-step multiplier (moving frame, rotation-proof). ~0 marginal, <0
-                  metastable. + P(a_t<0) (overshoot fraction).
+  S1 burstiness : catapult inter-arrival (sigma-mu)/(sigma+mu). RETIRED as a discriminator --
+                  refractory-check (2026-07-10) showed B<0 is a detector dead-time artifact: at
+                  honest refractory (r=2) every cell has B>0 and the marginal/metastable sign-flip
+                  vanishes. Kept for the record with a small refractory + bootstrap CI, NOT headline.
+  cat_rate      : catapults / step. The robust EVENT signature, used as a MATCHED-BATCH RATIO
+                  (SGDM/SGD at same B,lr) which cancels detector settings AND batch noise.
+                  Metastable is QUIETER (lower rate: rare escapes) -- not stormier.
+  S2 tau_kappa  : AR(1) autocorr time of detrended kappa. Confounded by per-batch noise at small
+                  batch (kappa_t ~ white there). lam_full version is the clean slow variable, BUT
+                  lam_full is undersampled (~2-3 pts per autocorr time) -> weak; needs denser
+                  sampling in the slow-kick follow-up. Reported, flagged.
+  S3 restore    : slope of d kappa_{t+1} vs (kappa-mean); ~1.0 = white-noise limit (confounded).
+  S4 Elog_a     : E[log|a_t|] one-step multiplier. Also batch-noise confounded at small batch.
+
+PRE-REGISTERED DECISION RULE (fixed before the grid finished, 2026-07-10):
+  Cells count only if BOTH twins are live+plateaued (not diverged, status done). Seeds pooled.
+  "TWO PHASES" is supported iff, across >=4 matched (B,lr) pairs, BOTH co-occur:
+    (i)  equilibrium drop: GBS_SGDM < 0.7 * GBS_SGD (and kappa_SGDM < kappa_SGD), AND
+    (ii) event-rate drop: cat_rate_SGDM / cat_rate_SGD < 0.5 (bootstrap CI excludes 1),
+  while GBS ~ 2 persists for SGDM at large batch (b>=512) under increasing beta (marginal-with-
+  memory). Otherwise report "R-continuum" (equilibrium declines smoothly with R, no distinct
+  event-statistics phase). Burstiness clustering is NOT part of the rule (artifact).
 Prints a per-cell table and the marginal-vs-metastable endpoint contrast.
 """
 import os, sys, json, glob, re
@@ -51,12 +65,17 @@ def restoring(kappa):
     return -slope, -s_up, -s_dn      # positive = restoring
 
 
-def burstiness(loss):
-    on = L.detect_catapults(np.asarray(loss, float))
-    if len(on) < 4:
-        return np.nan, len(on) / max(1, len(loss))
-    iat = np.diff(on).astype(float); mu, sd = iat.mean(), iat.std()
-    return float((sd - mu) / (sd + mu + 1e-30)), float(len(on) / len(loss))
+def burstiness(loss, refractory=3):
+    # honest small dead-time (r=20 manufactures B<0); bootstrap CI over the interarrival list.
+    on = L.detect_catapults(np.asarray(loss, float), K=3.0, win=50, refractory=refractory)
+    rate = len(on) / max(1, len(loss))
+    if len(on) < 6:
+        return np.nan, np.nan, rate
+    iat = np.diff(on).astype(float)
+    def B(x): return (x.std() - x.mean()) / (x.std() + x.mean() + 1e-30)
+    rng = np.random.default_rng(0)
+    boot = [B(rng.choice(iat, len(iat))) for _ in range(400)]
+    return float(B(iat)), float(np.std(boot)), float(rate)
 
 
 def analyze(cell_dir):
@@ -70,7 +89,7 @@ def analyze(cell_dir):
     kap = kap[np.isfinite(kap)]
     if len(kap) < 100:
         return None
-    B, rate = burstiness(loss)
+    B, B_std, rate = burstiness(loss)
     tau = ar1_tau(ema_detrend(kap))
     rs, rup, rdn = restoring(kap)
     av = a[np.isfinite(a)]
@@ -86,7 +105,7 @@ def analyze(cell_dir):
             tau_f = ar1_tau(ema_detrend(lf)); rs_f = restoring(lf)[0]
     return dict(tag=m["tag"], optn=m["optn"], beta=m["beta"], batch=m["batch"], lr=m["lr"],
                 n=len(kap), kappa=float(np.median(kap)), gbs=float(np.nanmedian(d["gbs"][pl])),
-                S1_burst=B, cat_rate=rate, S2_tau=tau, S3_restore=rs, S3_up=rup, S3_dn=rdn,
+                S1_burst=B, S1_burst_std=B_std, cat_rate=rate, S2_tau=tau, S3_restore=rs, S3_up=rup, S3_dn=rdn,
                 S2_tau_full=tau_f, S3_restore_full=rs_f,
                 S4_Elog_a=float(np.mean(np.log(np.abs(av) + 1e-30))), S4_pneg=float(np.mean(av < 0)),
                 censored=m.get("censored"))
