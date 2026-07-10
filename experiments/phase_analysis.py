@@ -18,14 +18,27 @@ drift doesn't confound the timescale statistics.
   S3 restore    : slope of d kappa_{t+1} vs (kappa-mean); ~1.0 = white-noise limit (confounded).
   S4 Elog_a     : E[log|a_t|] one-step multiplier. Also batch-noise confounded at small batch.
 
-PRE-REGISTERED DECISION RULE (fixed before the grid finished, 2026-07-10):
-  Cells count only if BOTH twins are live+plateaued (not diverged, status done). Seeds pooled.
-  "TWO PHASES" is supported iff, across >=4 matched (B,lr) pairs, BOTH co-occur:
-    (i)  equilibrium drop: GBS_SGDM < 0.7 * GBS_SGD (and kappa_SGDM < kappa_SGD), AND
-    (ii) event-rate drop: cat_rate_SGDM / cat_rate_SGD < 0.5 (bootstrap CI excludes 1),
-  while GBS ~ 2 persists for SGDM at large batch (b>=512) under increasing beta (marginal-with-
-  memory). Otherwise report "R-continuum" (equilibrium declines smoothly with R, no distinct
-  event-statistics phase). Burstiness clustering is NOT part of the rule (artifact).
+FROZEN DECISION RULE (2026-07-10, after the matched-batch controls killed all passive EVENT stats):
+  Matched-batch controls retired every passive event-statistics signature:
+    - burstiness/clustering : detector dead-time artifact (B<0 dies at refractory r=2).
+    - event rate            : baseline-variance artifact (fluctuation-scaled SGDM/SGD ratio is >1
+                              and drifts with k, opposite the absolute-threshold "quieter" read).
+    - excursion-size dist   : identical shape (p99/p50, Hill alpha, kurtosis) SGD vs SGDM at
+                              matched (B,lr); Hill/kurt track BATCH, not optimizer.
+  => The ONLY robust matched-batch discriminator is EQUILIBRIUM POSITION (kappa/GBS at edge vs
+     below), which declines smoothly with R. Passive analysis therefore supports
+     "R-CONTINUUM with endpoints" (marginal = at edge, metastable = below), NOT two event-
+     statistically distinct phases. Clustering exists universally (B>0 at honest r) but does not
+     discriminate -- report as such, don't hide.
+  The verdict is DECIDED by the CAUSAL slow-kick (slow_kick.py), the one instrument passive stats
+  can't stand in for: at matched (B,lr), kick kappa and fit the restoring rate + up/down asymmetry.
+    - GENUINE PHASE STRUCTURE iff the restoring force is QUALITATIVELY different (e.g. marginal
+      shaves-from-above with a rate that stays O(1) while metastable's ->0, i.e. a sharp change /
+      a mixed region where position has left the edge but restoring is still marginal-like).
+    - R-CONTINUUM iff restoring weakens SMOOTHLY with R, tracking position with no dissociation.
+  Report restoring-rate and asymmetry PER matched pair including mid-R crossover cells (where the
+  two can dissociate). lam_full autocorr (S2/S3 here) is undersampled -> not load-bearing; the
+  slow-kick logs kappa every step and is the clean slow-variable measurement.
 Prints a per-cell table and the marginal-vs-metastable endpoint contrast.
 """
 import os, sys, json, glob, re
