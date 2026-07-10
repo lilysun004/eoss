@@ -82,6 +82,9 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
         json.dump(dict(tag=tag, optn=optn, beta=beta, batch=batch, lr=lr, seed=seed,
                        status=status, steps=len(dense["step"]), n_catapults=int(ncat),
                        diverged=diverged, catapult_target=catapult_target, stride=stride,
+                       # censored = plateau ended at max_steps before the catapult budget was met
+                       # (deep-basin cells): waiting-time stats are right-censored, not complete.
+                       censored=bool(status == "done" and ncat < catapult_target),
                        elapsed_s=time.time() - t0), open(meta_path, "w"), indent=1)
 
     step = 0
@@ -102,9 +105,16 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
             try:
                 Hs = hvp(s, retain_graph_override=True)
                 sHs = float(T.dot(s, Hs)); A = -float(T.dot(gd, s)); ss = float(T.dot(s, s))
-                u = u_prev.clone() if u_prev is not None else T.randn(g.numel())
+                # seed: warm u_prev at large batch; gradient direction at small batch (u_B rotates
+                # ~fully each step there so u_prev is stale, but g_B is a good GN-aligned initializer).
+                # more iterations at small batch to resolve lambda_max when the eigengap is small.
+                if u_prev is not None and batch > 32:
+                    u = u_prev.clone()
+                else:
+                    u = gd.clone()
                 u = u / (u.norm() + 1e-30)
-                for _ in range(n_power):
+                n_eff = 12 if batch <= 32 else n_power
+                for _ in range(n_eff):
                     Hu = hvp(u, retain_graph_override=True); nrm = float(Hu.norm())
                     if nrm < 1e-20:
                         break

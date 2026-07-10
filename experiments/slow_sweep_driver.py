@@ -38,13 +38,16 @@ STRIDE = {8: 1, 32: 1, 128: 1, 512: 2, 2048: 2}    # cost control on the big-bat
 # The 6 barbell depth cells, explicit VALIDATED-live lrs (from old-sweep live cells + archetypes),
 # 3-4x catapult budget + 3 seeds. Marginal-large-memory is beta0.6 (beta0.9 b2048 has no live
 # window -- reach-edge-then-diverge above, converge-dead below).
+# Endpoints need to be at their OPERATING POINTS, not on the (momentum-anchored) grid -- SGD's edge
+# sits above the momentum-live span, so the SGD depth cells get their own hotter lrs. lrs below are
+# gated by the liveness smoke (not diverged AND kappa/GBS climbing toward the edge for the marginals).
 DEPTH_CELLS = [
-    ("SGD",          0.0,  8,    0.0065, "marginal-small"),
-    ("SGD-Momentum", 0.9,  8,    0.0040, "metastable"),
-    ("SGD-Momentum", 0.99, 8,    0.0015, "metastable-deep"),
-    ("SGD",          0.0,  2048, 0.0170, "marginal-large"),
-    ("SGD-Momentum", 0.6,  2048, 0.0065, "marginal-large-memory"),
-    ("SGD-Momentum", 0.9,  128,  0.0060, "crossover"),
+    ("SGD",          0.0,  8,    0.0100, "marginal-small"),          # own hotter lr -> SGD b8 edge
+    ("SGD-Momentum", 0.9,  8,    0.0020, "metastable"),              # archetype-validated live
+    ("SGD-Momentum", 0.99, 8,    0.0002, "metastable-deep"),         # beta0.99 edge very low (kesten used 1e-4)
+    ("SGD",          0.0,  2048, 0.0170, "marginal-large"),          # smoke kappa~2.07 (at edge)
+    ("SGD-Momentum", 0.6,  2048, 0.0065, "marginal-large-memory"),   # smoke kappa~3.18 (at edge)
+    ("SGD-Momentum", 0.9,  128,  0.0060, "crossover"),               # smoke kappa~1.99
 ]
 
 
