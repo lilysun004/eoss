@@ -18,10 +18,34 @@ Design, with tonight's lessons built in:
   - QUALITATIVE asymmetry prediction (no threshold choice): marginal shaves-from-above hard
     (restore-from-above rate stays O(1)); basin re-parks weakly/symmetrically (rate -> 0).
 
-Pairs span R (metastable -> crossover -> marginal-with-memory) so restoring can DISSOCIATE from
-position at mid-R -- the phases-vs-continuum discriminator. Verdict:
-  restoring qualitatively different / dissociates from position  -> PHASES (position = order param).
-  restoring weakens smoothly with R, tracks position everywhere  -> R-CONTINUUM with endpoints.
+THE KKT FRAME (the correct form of the distinction). The weather-universality result = a quasi-
+potential U_eff(kappa): noise supplies fluctuations, DRIFT supplies the landscape, system parks at
+min U_eff. drift(kappa) ~ alpha(kappa) - c*E[x^2](kappa): alpha = progressive-sharpening drive,
+E[x^2] = stationary amplitude of the unstable coordinate (cubic self-stabilization shaves sharpness
+in proportion, Damian et al.). E[x^2] needs AMPLIFICATION, which needs coupling to u_B. SGD couples
+(fresh gradient) -> E[x^2] diverges as kappa -> stochastic edge -> shaving is a WALL -> kappa* pins
+AT it (constraint ACTIVE, GBS=2 = saturation read off the path, multiplier>0). Momentum small-batch
+can't couple (R>>1) -> no amplification wall -> kappa* set by where the DRIVE dies (alpha->0:
+interpolation/alignment saturation) in the constraint INTERIOR (constraint SLACK). GD-at-EoS solves
+min L s.t. S<=edge; the two regimes = the inequality active vs slack. Genuine BINARY (LP phases,
+not thermodynamic) coexisting with continuous weather; order parameter = the multiplier, not any
+fluctuation moment. kappa* = min(kappa_constraint [=edge, computable, GBS=2], kappa_exhaustion
+[loss-geometry+history, not a stability quantity]) -- the north star's universal position exists
+exactly on the branch where stability binds.
+
+SHARPENED KICK PREDICTION -- restoring vs NEUTRAL DRIFT (calibration-free, immune to the threshold
+ambiguities that killed the passive stats):
+  ACTIVE (marginal SGD): kick kappa UP past edge -> immediate hard shave-back (wall is right there);
+    kick DOWN into interior -> slow return via drive. RETURN FRACTION high (esp. up). Attractor.
+  SLACK (metastable SGDM): kick kappa within the slack interior (up toward the wall OR down) ->
+    NO restoring, kappa re-parks at the DISPLACED value (return fraction ~0 BOTH directions), until
+    a kick past the wall triggers catapult/divergence. Parking lot, not attractor.
+  => discriminator = return-fraction (does displaced kappa relax back to kappa0, or stay put?), NOT
+     restoring-rate magnitude. Report the SGD-vs-SGDM contrast at matched batch; the crossover pair
+     (b128, R~1) is where it can dissociate from position.
+COMPANION (path dependence, M0'): active constraint = attractor (kappa0 reproducible across seeds/
+warm-starts); slack = parking lot (history-dependent). Cheap check available from sweep seed-spread
++ a warm-start-from-flatter run (climbs back = drive alive; stays = exhausted).
 """
 import os, sys, json, copy
 import numpy as np
@@ -105,14 +129,20 @@ def kick_cell(name, optn, params, batch, lr, steps, M=300, P=80, Rlx=300, eps=0.
                kappa0=kappa0, kappa_sigma=sigma, passive_restore=passive)
     for tag, mult in [("up", 1 + eps), ("down", 1 - eps)]:
         kk, seg, bad = run_segment(st, [1.0, mult, 1.0], [60, P, Rlx], seed=23)
-        res[f"gamma_{tag}"] = fit_relax_rate(kk[seg == 2] - kappa0)
-        disp = float(np.nanmedian(kk[seg == 1]) - kappa0)
-        res[f"disp_{tag}_over_sigma"] = disp / sigma        # power check: kick supra-noise?
+        relax = kk[seg == 2]
+        kpulse = float(np.nanmedian(kk[seg == 1]))             # displaced kappa (end of pulse)
+        krelax = float(np.nanmedian(relax[-len(relax) // 3:])) if len(relax) > 6 else np.nan  # settled
+        # RETURN FRACTION: 1 = relaxed back to kappa0 (ACTIVE/attractor); 0 = stayed displaced (SLACK)
+        denom = kpulse - kappa0
+        res[f"return_{tag}"] = float((kpulse - krelax) / denom) if abs(denom) > 1e-9 else np.nan
+        res[f"gamma_{tag}"] = fit_relax_rate(relax - kappa0)    # secondary: rate
+        res[f"disp_{tag}_over_sigma"] = denom / sigma          # power check: kick supra-noise?
+        res[f"diverged_{tag}"] = bool(bad)                     # kicked past the wall?
         np.savez(os.path.join(OUT, f"trace_{name}_{tag}.npz"), kappa=kk, seg=seg, kappa0=kappa0)
-    res["asymmetry"] = float((res.get("gamma_up") or np.nan) - (res.get("gamma_down") or np.nan))
-    print(f"  {name:14s} kap0={kappa0:.2f} sig={sigma:.3f} passive={passive:+.3f} "
-          f"g_up={res.get('gamma_up'):+.3f} g_dn={res.get('gamma_down'):+.3f} asym={res['asymmetry']:+.3f} "
-          f"disp/sig(up)={res['disp_up_over_sigma']:+.1f}", flush=True)
+    res["asymmetry"] = float((res.get("return_up") or np.nan) - (res.get("return_down") or np.nan))
+    print(f"  {name:16s} kap0={kappa0:.2f} sig={sigma:.3f} | RETURN up={res.get('return_up'):+.2f} "
+          f"dn={res.get('return_down'):+.2f} (disp/sig up={res['disp_up_over_sigma']:+.1f}) "
+          f"| {'ACTIVE/attractor' if (res.get('return_up') or 0)>0.5 else 'SLACK/parking-lot'}", flush=True)
     return res
 
 
@@ -138,19 +168,22 @@ def main():
         # CONTRAST at matched batch: restoring of SGD (marginal) vs SGDM (below edge)
         sgd = pair.get("SGD"); sgdm = next((v for k, v in pair.items() if k != "SGD"), None)
         if sgd and sgdm and not sgd.get("diverged") and not sgdm.get("diverged"):
-            print(f"  CONTRAST {pname}: kappa0 {sgd['kappa0']:.2f}->{sgdm['kappa0']:.2f} | "
-                  f"g_up {sgd.get('gamma_up'):+.3f}->{sgdm.get('gamma_up'):+.3f} | "
-                  f"asym {sgd['asymmetry']:+.3f}->{sgdm['asymmetry']:+.3f}", flush=True)
+            print(f"  CONTRAST {pname}: kappa0 {sgd['kappa0']:.2f}(SGD)->{sgdm['kappa0']:.2f}(SGDM) | "
+                  f"return_up {sgd.get('return_up'):+.2f}->{sgdm.get('return_up'):+.2f} "
+                  f"=> {'DISSOCIATES (active->slack)' if (sgd.get('return_up') or 0)>0.5 and (sgdm.get('return_up') or 1)<0.3 else 'same character'}",
+                  flush=True)
 
-    print("\n===== VERDICT (restoring-force contrast across R) =====")
-    print(f"{'pair':12s}{'cell':16s}{'kappa0':>8}{'g_up':>8}{'g_down':>8}{'asym':>8}{'disp/sig':>9}")
+    print("\n===== VERDICT (return-fraction contrast across R = active vs slack constraint) =====")
+    print(f"{'cell':30s}{'kappa0':>8}{'ret_up':>8}{'ret_dn':>8}{'constraint':>16}")
     for r in results:
         if r.get("diverged"):
-            print(f"{r['name']:28s} diverged"); continue
-        print(f"{r['name']:28s}{r['kappa0']:8.2f}{r.get('gamma_up',float('nan')):8.3f}"
-              f"{r.get('gamma_down',float('nan')):8.3f}{r['asymmetry']:8.3f}{r.get('disp_up_over_sigma',float('nan')):9.1f}")
-    print("\n PHASES: marginal (SGD) restores hard & asymmetric, SGDM restoring -> 0 / dissociates at crossover.")
-    print(" CONTINUUM: restoring weakens smoothly with kappa0 (position), same character everywhere.")
+            print(f"{r['name']:30s} diverged"); continue
+        ru = r.get("return_up") or np.nan
+        state = "ACTIVE" if ru > 0.5 else ("SLACK" if ru < 0.3 else "intermediate")
+        print(f"{r['name']:30s}{r['kappa0']:8.2f}{ru:8.2f}{(r.get('return_down') or np.nan):8.2f}{state:>16}")
+    print("\n KKT-PHASES: SGD returns (active/attractor, ret~1); SGDM neutral (slack/parking-lot, ret~0)")
+    print("   at matched batch, with the crossover pair (b128) showing where active->slack flips.")
+    print(" CONTINUUM: return fraction varies smoothly with kappa0, no sharp active/slack boundary.")
 
 
 if __name__ == "__main__":
