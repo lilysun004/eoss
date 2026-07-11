@@ -179,7 +179,14 @@ def summarize(cell):
 
 def main():
     results = []
+    marginal_only = os.environ.get("EOSS_MARGINAL_ONLY") == "1"   # pulse is a constraint-side
+    # actuator: it can only displace an ACTIVE-constraint (marginal) lambda. Slack (metastable)
+    # cells get displacement ~noise (return=noise/noise) -> prune them; the transplant actuator
+    # (transplant.py) is what probes the slack interior. Pulse run keeps: marginal F(dlambda) +
+    # the eps-at-divergence = each marginal cell's measured stochastic WALL POSITION.
     for pi, (pname, batch, lr, twins) in enumerate(PAIRS):
+        if marginal_only:
+            twins = [t for t in twins if t[0] == "SGD"]
         print(f"\n=== PAIR {pname} (b{batch} lr{lr}) ===", flush=True)
         cells = {}
         for optn, prm in twins:
