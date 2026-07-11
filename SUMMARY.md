@@ -80,21 +80,29 @@ ill-posed, not merely rotation-contaminated). So we probe the **slow variable** 
 — no rotating-coordinate problem):
 
 - **Marginal side — lr-pulse F(δλ) `slow_kick.py`:** displacing λ against the active constraint gives a
-  clean force-vs-displacement curve. SGD b32: **interior return 0.74–0.92** (λ relaxes back = attractor)
-  then a **hard wall** (divergence) at eps≈0.5 — a *measured wall position* per cell. This is the
-  textbook active-constraint / thermostat signature. Crucially the relax window is sized to ≥5τ (a
-  short window would false-read the slow marginal return as "slack").
+  clean force-vs-displacement curve — **active-constraint / thermostat confirmed for every SGD cell**:
+  interior return **0.72–0.83 (b32), 0.81–0.95 (b128), 0.98–1.01 (b512)** (λ relaxes back = attractor),
+  then a **hard wall** (divergence) at **eps ≈ 0.5** (lr×1.5) — a *measured wall position* per cell.
+  (b8 is noisy, return 0.9–2.7, no clean wall — small-batch chaos.) The relax window is sized to ≥5τ,
+  so a slow return isn't false-read as "slack."
 - **The lr-pulse is a *constraint-side* actuator** — it works on the active (marginal) cell but
   **cannot displace a slack (metastable) λ** (displacement ≈ noise, return = noise/noise). Itself
-  consistent with slackness, but not a positive test.
+  consistent with slackness, but not a positive test — hence the transplant.
 - **Metastable side — transplant actuator `transplant.py` (η-clean, direct λ displacement):** SGD's own
   progressive-sharpening checkpoints form a graded λ-ladder; transplant each θ into the SGDM optimizer
-  (buffer zeroed, warm-up excluded) and watch λ. **Status/interpretation:** the first (wide-source) run
-  is *suggestive of the slack interior* — the one source just above plateau **PARKED** (λ stayed at the
-  transplant), while higher sources were shaved back by the **wall** (they overshot the *narrow*
-  metastable interior). A focused **interior-source re-run** (sources 1.05–1.32× plateau) is in progress
-  to populate the flat region and confirm PARK vs RETURN, with the SGD-into-SGD control (cancels the
-  loss confound) and loss logged throughout. **Verdict pending that re-run.**
+  (buffer zeroed, warm-up excluded) and watch λ, with an SGD-into-SGD control at the *matched* source
+  (cancels the loss confound) and loss logged throughout. **Resolved verdict — a gradient in R, not a
+  sharp phase line:**
+  - **Deep endpoint (b32 β0.9, R≈9): the KKT-slack signature.** Interior source (λ 101.7, plateau 84.5)
+    → SGDM **PARKS at 98.7** (moves only ~17% toward plateau) while the SGD control *climbs* to 217.8.
+    Force-free interior vs active twin — a genuine causal phases contrast, loss-controlled. *Caveat:
+    single interior source* (the fine targets collapsed onto one sparse checkpoint) — suggestive, needs
+    more deep-endpoint sources to firm.
+  - **Shallow point (b8 β0.6, R≈2): restoring present.** All interior sources (104–131, plateau 96) →
+    SGDM **RETURNS to ~86–95**, SGD control climbs to 141–164 — both regulated toward *different*
+    attractors (continuum-like). β0.6 sits near the active boundary, so this is expected.
+  So the active→slack transition is **real but gradual in R**: a genuine force-free slack region emerges
+  at the high-R endpoint (phases-like there), with continuous restoring at moderate R.
 
 ## Part V — The instrument graveyard (a real methods contribution)
 
@@ -108,11 +116,16 @@ matched-batch control; the one analysis that included it is the one that survive
 ## Part VI — Honest state & the north-star answer
 
 - **Solid:** the R-map; GBS = 2 at the edge including large-batch momentum; the weather-universality
-  (buffer moves the house not the weather); the KKT frame; the marginal F(δλ) with measured walls.
-- **Pending:** the transplant interior re-run decides whether the metastable interior is truly force-free
-  (PARK → **phases**, KKT slack, position = order parameter) or has a restoring force the pulse couldn't
-  see (RETURN → **continuum**, or a third mechanism to name). The lr-pulse's inability to move slack λ is
-  suggestive of slack but must be confirmed by direct transplantation.
+  (buffer moves the house not the weather); the KKT frame; the marginal F(δλ) with measured walls
+  (return 0.7–1.0, wall eps≈0.5).
+- **Resolved (with a caveat):** the transplant shows the active→slack transition is **real but gradual
+  in R** — the deep-R endpoint (b32 β0.9) has a **force-free slack interior** (transplant parks while the
+  SGD twin climbs = causal phases contrast, loss-controlled), while moderate R (b8 β0.6) still restores
+  (continuum-like). So: **R-continuum whose high-R endpoint is a genuine KKT-slack region**, not a sharp
+  thermodynamic phase boundary. *Firm-up needed:* the deep-endpoint PARK rests on one interior source
+  (sparse SGD checkpoints); the clean follow-up is denser checkpoint saving so the deep cells get 3–4
+  interior sources, plus a deeper cell (b128/b512 β0.9 at a metastable lr) to trace where park↔return
+  flips along R.
 - **North star:** the dream "one scalar = const for all optimizers/batches" does **not** hold
   unconditionally — but the *conditional* universal exists exactly where the stability constraint binds:
   **at the edge ⟺ GBS = 2**, optimizer-agnostic and path-computable. Whether a given (optimizer, batch)
