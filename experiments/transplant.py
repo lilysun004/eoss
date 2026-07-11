@@ -1,33 +1,33 @@
 """
-Transplant actuator -- the eta-clean, DIRECT displacement of the slow variable lambda, and the test
-the phases verdict actually rests on. The lr-pulse (slow_kick.py) is a CONSTRAINT-SIDE actuator: it
-displaces lambda by shaving against an ACTIVE constraint, so it works on the marginal cell (clean
-F(dlambda), measured wall) but cannot move a SLACK (metastable) lambda -- displacement ~ noise. To
-probe the slack INTERIOR we must displace lambda directly, with eta never changing.
+Transplant actuator -- eta-clean DIRECT displacement of the slow variable lambda (only theta moves,
+lr and beta are NEVER touched, so no cell can be tipped into divergence/convergence). Used here to
+verify the strong claim: is there a metastable PHASE -- a finite REGION where the operating point is
+genuinely FORCE-FREE (KKT constraint slack, no restoring) -- inside COMFORTABLY-LIVE cells, not just
+the knife-edge deep endpoint near the diverge-or-crawl boundary.
 
-METHOD (the SGD twin's own progressive-sharpening trajectory IS a graded lambda-ladder at the same
-(B,lr,data)): train SGD saving checkpoints -> lambda climbs gradually -> a natural ladder of theta
-sources spanning lambda. Transplant each theta into the SGDM optimizer (buffer ZEROED; exclude the
-~1/(1-beta) buffer warm-up transient from the fit), run at the target lr with NO other intervention,
-watch lambda_probe (held-out). eta never excursions -> no actuator-coupling artifact.
+Method: SGD's progressive-sharpening checkpoints (saved DENSELY, ~every 250 steps) form a graded
+lambda-ladder at the same (B,lr,data). Transplant each theta into the SGDM optimizer (buffer zeroed;
+~1/(1-beta) warm-up excluded), run LONG at the target lr, watch lambda_probe (held-out).
 
-PRE-REGISTERED READINGS (fixed before running):
-  PARK   : lambda stays at the transplanted value (drift <= baseline diffusion) -> slack interior
-           confirmed -> the operating point is NOT force-regulated -> PHASES (KKT slack).
-  RETURN : lambda relaxes back down to the cell's own plateau lambda* -> there IS a restoring force
-           the pulse couldn't see -> regulated operating point -> CONTINUUM (or a 3rd mechanism).
-  CATAPULT: lambda/loss takes off -> the transplant landed past the wall -> step DOWN the ladder
-           (another wall measurement, not a failure).
-Ladder (>=3 source levels) needed for the same reason the amplitude ladder was: one level can't tell
-interior-flat from wall.
+DELIVERABLE = the restoring-RATE curve k(R): k = rate at which lambda relaxes toward the cell's own
+plateau (fit -slope of log|lambda(t)-plateau| over the relax). PARK <=> k ~ 0 (lambda stays at the
+transplant); RETURN <=> k > 0 (relaxes to plateau). Reported per (cell, source, seed) with:
+  - the DRIFT-NULL: the |k| a stationary plateau (pure diffusion) fakes over the same window -- k must
+    exceed it to count as real restoring;
+  - the SGD-twin's k at the MATCHED source (cancels loss confound; validates the machinery restores
+    where restoring is known);
+  - a TIMESCALE bound: 1/k in steps vs the SGD twin's, so "parked for N steps" becomes "restoring
+    timescale, if any, > M x the SGD twin's".
+PHASE = k hits 0 (CI includes 0, excludes SGD-twin's k) at finite R and STAYS there across sources
+AND seeds, from ABOVE and BELOW the plateau. CONTINUUM = k decays smoothly toward 0 without reaching
+it inside the live region ("asymptotic slackness" -- still coherent, softer sentence).
 
-CONTROLS (no instrument ships without one):
-  (a) transplant into SGD too (its own earlier checkpoints): from below its edge it should climb back
-      via sharpening (slow near interpolation -- log, don't over-read); from a hotter source above it
-      should shave back fast. Validates the machinery shows restoring where restoring is known.
-  (b) LOSS confound: an earlier checkpoint carries higher loss AND higher lambda, so lambda-relaxation
-      could be loss-relaxation. Mitigate: prefer LATE sources (high lambda, low loss) and LOG LOSS
-      through the relax so the two can be separated in analysis.
+The BELOW-plateau source is the most discriminating test: KKT-slack predicts park DOWNWARD too; if
+lambda instead CLIMBS back to the plateau from below, the position is a genuine attractor (residual
+drive), not parked-by-exhaustion -- and the phase picture needs revision. (Below-plateau sources come
+from early SGD training -> higher loss, so the loss column matters most there.)
+
+Cells span R inside validated-live windows ONLY (no dial pushed toward the dead region).
 """
 import os, sys, json, copy
 import numpy as np
@@ -50,18 +50,20 @@ OUT = os.path.join(_REPO, "results", "transplant")
 os.makedirs(OUT, exist_ok=True)
 
 
-def train_ckpts(optn, params, batch, lr, steps, n_ckpt=12, probe=512):
-    """Train, saving (step, lambda_full, loss, state_dict) checkpoints along the sharpening path."""
+def train_ckpts(optn, params, batch, lr, steps, ckpt_every=250, probe=512):
+    """Train, saving (lambda_full, loss, state_dict) DENSELY along the sharpening path."""
     X, Y = L.get_data(); net, loss_fn = L.build()
-    opt = create_optimizer(optn, net, lr, params)
-    Xp, Yp = X[:probe], Y[:probe]
-    g = T.Generator().manual_seed(0); u = None; every = max(1, steps // n_ckpt); ck = []
+    opt = create_optimizer(optn, net, lr, params); Xp, Yp = X[:probe], Y[:probe]
+    g = T.Generator().manual_seed(0); u = None; ck = []
     for s in range(steps):
         idx = T.randperm(len(X), generator=g)[:batch]; Xb, Yb = X[idx], Y[idx]
-        pr = net(Xb).squeeze(-1); lo = loss_fn(pr, Yb)
+        lo = loss_fn(net(Xb).squeeze(-1), Yb)
         if not np.isfinite(lo.item()) or lo.item() > 1e6:
             break
         opt.zero_grad(); lo.backward(); opt.step()
+        # dense early (every 15 steps, first 600) so the sub-plateau ramp is captured -> a genuine
+        # BELOW-plateau source exists (lambda climbs past the SGDM plateau within ~50 steps); coarser after.
+        every = 15 if s < 600 else ckpt_every
         if (s + 1) % every == 0:
             lam, u = lam_probe(net, loss_fn, Xp, Yp, u)
             with T.no_grad():
@@ -70,12 +72,10 @@ def train_ckpts(optn, params, batch, lr, steps, n_ckpt=12, probe=512):
     return ck, loss_fn, (X, Y)
 
 
-def transplant_relax(source_sd, optn, params, batch, lr, XY, loss_fn, N, warm_excl, probe=512):
-    """Load source theta into a FRESH `optn` optimizer (buffer zeroed), run N steps, log lambda+loss."""
+def transplant_relax(source_sd, optn, params, batch, lr, XY, loss_fn, N, seed, probe=512):
     X, Y = XY; net, _ = L.build(); net.load_state_dict(copy.deepcopy(source_sd))
-    opt = create_optimizer(optn, net, lr, params)
-    Xp, Yp = X[:probe], Y[:probe]; g = T.Generator().manual_seed(7); u = None
-    lam, loss = [], []
+    opt = create_optimizer(optn, net, lr, params); Xp, Yp = X[:probe], Y[:probe]
+    g = T.Generator().manual_seed(seed); u = None; lam, loss = [], []
     for _ in range(N):
         lv, u = lam_probe(net, loss_fn, Xp, Yp, u)
         with T.no_grad():
@@ -84,90 +84,81 @@ def transplant_relax(source_sd, optn, params, batch, lr, XY, loss_fn, N, warm_ex
         idx = T.randperm(len(X), generator=g)[:batch]; Xb, Yb = X[idx], Y[idx]
         lo = loss_fn(net(Xb).squeeze(-1), Yb)
         if not np.isfinite(lo.item()) or lo.item() > 1e6:
-            lam += [float("nan")] * (N - len(lam)); loss += [float("nan")] * (N - len(loss)); break
+            lam += [np.nan] * (N - len(lam)); loss += [np.nan] * (N - len(loss)); break
         opt.zero_grad(); lo.backward(); opt.step()
     return np.array(lam), np.array(loss)
 
 
-def classify(lam, source_lam, plateau_lam, sigma, warm_excl):
-    a = lam[warm_excl:]; a = a[np.isfinite(a)]
-    if len(a) < 20 or not np.all(np.isfinite(lam)):
-        return "CATAPULT", float("nan")
-    settled = float(np.median(a[-len(a) // 3:]))
-    # fraction of the source->plateau gap traversed: 0 = parked at source, 1 = returned to plateau
-    gap = source_lam - plateau_lam
-    frac = float((source_lam - settled) / gap) if abs(gap) > 1e-9 else float("nan")
-    if not np.isfinite(frac):
-        return "n/a", settled
-    if abs(source_lam - settled) < 3 * sigma:
-        return "PARK", settled          # stayed at transplant (slack)
-    if frac > 0.5:
-        return "RETURN", settled        # relaxed toward own plateau (restoring)
-    return "PARTIAL", settled
+def fit_k(lam, plateau, warm):
+    """restoring rate toward plateau: -slope of log|lambda - plateau| vs t over the relax. k~0 = park."""
+    a = lam[warm:]; ok = np.isfinite(a)
+    a = a[ok]
+    if len(a) < 30 or not np.all(np.isfinite(lam)):
+        return np.nan, np.nan          # (k, settled); nan k => catapult
+    d = np.abs(a - plateau) + 1e-9; t = np.arange(len(a))
+    slope = np.polyfit(t, np.log(d), 1)[0]
+    return float(-slope), float(np.median(a[-len(a) // 3:]))
 
 
-def run_cell(name, batch, lr, sgdm_params, N=1200, probe=512):
-    print(f"\n=== {name} (b{batch} lr{lr}, SGDM {sgdm_params}) ===", flush=True)
-    beta = sgdm_params["beta"]; warm = int(3 / (1 - beta))          # ~buffer warm-up transient
-    # SGD source ladder + baseline diffusion sigma
-    sgd_ck, loss_fn, XY = train_ckpts("SGD", {}, batch, lr, 4000, n_ckpt=12)
-    # SGDM's own plateau lambda* (the return target) + its lambda diffusion
-    sgdm_ck, _, _ = train_ckpts("SGD-Momentum", sgdm_params, batch, lr, 4000, n_ckpt=8)
-    plateau_lam = float(np.median([c["lam"] for c in sgdm_ck[-4:]]))
-    sigma = float(np.std([c["lam"] for c in sgdm_ck[-4:]])) + 1e-9
-    # pick source levels by TARGET lambda relative to SGDM's plateau: just above (interior) up toward
-    # the wall. (Late SGD sources at lam~edge overshoot SGDM's wall -> only catapult; useless for the
-    # interior test.) For each target, take the SGD checkpoint whose lam is closest.
+def run_cell(name, batch, lr, sgdm_params, R, N=4000, seeds=2):
+    print(f"\n=== {name} (b{batch} lr{lr}, SGDM {sgdm_params}, R~{R}) ===", flush=True)
+    beta = sgdm_params["beta"]; warm = int(3 / (1 - beta))
+    # lambda ramps FAST through the interior -> checkpoint densely (every 60 steps) for fine lambda coverage
+    sgd_ck, loss_fn, XY = train_ckpts("SGD", {}, batch, lr, 6000, ckpt_every=60)
+    sgdm_ck, _, _ = train_ckpts("SGD-Momentum", sgdm_params, batch, lr, 4000, ckpt_every=250)
+    plat = float(np.median([c["lam"] for c in sgdm_ck[-6:]]))
+    # DRIFT-NULL: proper null-displacement baseline -- transplant SGDM's OWN final theta back into
+    # SGDM and run N steps; lambda should stay at plateau, so |k| here is the diffusion floor.
+    lam_null, _ = transplant_relax(sgdm_ck[-1]["sd"], "SGD-Momentum", sgdm_params, batch, lr, XY, loss_fn, N, 7)
+    drift_null = abs(fit_k(lam_null, plat, warm)[0])
     lams = np.array([c["lam"] for c in sgd_ck])
-    # INTERIOR-targeted (metastable interior is narrow; 1.2-2x overshot into the wall). Fine sources
-    # just above plateau probe the flat slack region; env EOSS_WIDE=1 keeps the old wall-spanning set.
-    if os.environ.get("EOSS_WIDE") == "1":
-        targets = [1.2 * plateau_lam, 1.5 * plateau_lam, 2.0 * plateau_lam]
-    else:
-        targets = [1.05 * plateau_lam, 1.12 * plateau_lam, 1.20 * plateau_lam, 1.32 * plateau_lam]
-    idxs = sorted(set(int(np.argmin(np.abs(lams - t))) for t in targets))
-    res = dict(name=name, batch=batch, lr=lr, beta=beta, plateau_lam=plateau_lam, sigma=sigma,
+    fracs = [0.85, 1.0, 1.1, 1.2, 1.3, 1.5]     # below, null, interior x3, above-wall
+    res = dict(name=name, batch=batch, lr=lr, beta=beta, R=R, plateau=plat, drift_null=drift_null,
                warm=warm, sources=[])
-    for i in idxs:
-        src = sgd_ck[i]
-        lam_t, loss_t = transplant_relax(src["sd"], "SGD-Momentum", sgdm_params, batch, lr, XY, loss_fn, N, warm)
-        verdict, settled = classify(lam_t, src["lam"], plateau_lam, sigma, warm)
-        # control: same source into SGD (should relax toward SGD's own edge, i.e. restore)
-        lam_c, loss_c = transplant_relax(src["sd"], "SGD", {}, batch, lr, XY, loss_fn, N, warm)
-        ctl, settled_c = classify(lam_c, src["lam"], float(np.median([c["lam"] for c in sgd_ck[-4:]])), sigma, warm)
-        rec = dict(src_lam=src["lam"], src_loss=src["loss"], settled_sgdm=settled, verdict=verdict,
-                   settled_sgd_ctl=settled_c, ctl_verdict=ctl,
-                   loss_start=float(loss_t[warm]) if len(loss_t) > warm else float("nan"),
-                   loss_end=float(np.nanmedian(loss_t[-N // 3:])))
+    for fr in fracs:
+        i = int(np.argmin(np.abs(lams - fr * plat))); src = sgd_ck[i]
+        kk_sgdm, kk_sgd = [], []
+        for sd in range(seeds):
+            lam_m, loss_m = transplant_relax(src["sd"], "SGD-Momentum", sgdm_params, batch, lr, XY, loss_fn, N, 7 + sd)
+            lam_c, _ = transplant_relax(src["sd"], "SGD", {}, batch, lr, XY, loss_fn, N, 7 + sd)
+            k_m, set_m = fit_k(lam_m, plat, warm); k_c, set_c = fit_k(lam_c, plat, warm)
+            kk_sgdm.append(k_m); kk_sgd.append(k_c)
+            if sd == 0:
+                np.savez(os.path.join(OUT, f"trace_{name}_f{fr}.npz"), lam_sgdm=lam_m, loss_sgdm=loss_m,
+                         lam_sgd=lam_c, source_lam=src["lam"], plateau=plat)
+        rec = dict(frac=fr, src_lam=src["lam"], src_loss=src["loss"], settled_sgdm=set_m, settled_sgd=set_c,
+                   k_sgdm=float(np.nanmean(kk_sgdm)), k_sgdm_std=float(np.nanstd(kk_sgdm)),
+                   k_sgd=float(np.nanmean(kk_sgd)))
         res["sources"].append(rec)
-        np.savez(os.path.join(OUT, f"trace_{name}_src{src['lam']:.0f}.npz"),
-                 lam_sgdm=lam_t, loss_sgdm=loss_t, lam_sgd=lam_c, source_lam=src["lam"], plateau_lam=plateau_lam)
-        print(f"  source lam={src['lam']:6.1f} (loss={src['loss']:.4f}) -> SGDM settles {settled:6.1f} "
-              f"[{verdict:8s}] (plateau {plateau_lam:.1f}) | SGD-control settles {settled_c:6.1f} [{ctl}]",
-              flush=True)
+        tag = "PARK" if (np.isfinite(rec["k_sgdm"]) and rec["k_sgdm"] < 2 * drift_null) else \
+              ("CATAPULT" if not np.isfinite(rec["k_sgdm"]) else "RETURN")
+        print(f"  src {src['lam']:6.1f} ({fr:.2f}x, loss {src['loss']:.3f}) -> SGDM k={rec['k_sgdm']:.5f}"
+              f"+-{rec['k_sgdm_std']:.5f} [{tag}] settle {set_m:6.1f} (plat {plat:.1f}, null {drift_null:.5f}) "
+              f"| SGD-ctl k={rec['k_sgd']:.5f} settle {set_c:6.1f}", flush=True)
     json.dump(res, open(os.path.join(OUT, f"{name}.json"), "w"), indent=2)
     return res
 
 
+# validated-live cells spanning R (NO dial pushed toward the dead region)
 CELLS = [
-    ("b32_b0.9",  32,  0.005, {"beta": 0.9}),    # metastable (plateau lam ~126, sources up to ~500)
-    ("b8_b0.6",   8,   0.004, {"beta": 0.6}),    # partial-metastable
-    ("b512_b0.9", 512, 0.008, {"beta": 0.9}),    # SGDM marginal-with-memory (control: should NOT park low)
+    ("b8_b0.9_R9",   8,   0.002, {"beta": 0.9}, 9),    # R~9, decisive (different batch, same R as b32)
+    ("b32_b0.9_R9",  32,  0.005, {"beta": 0.9}, 9),    # R~9, deep endpoint with dense sources now
+    ("b128_b0.9_R3", 128, 0.006, {"beta": 0.9}, 3),    # R~3, mid
+    ("b8_b0.6_R2",   8,   0.004, {"beta": 0.6}, 2),    # R~2 anchor (expected to restore)
+    ("b32_b0.6_R2",  32,  0.005, {"beta": 0.6}, 2),    # R~2
 ]
 
 
 def main():
     allres = [run_cell(*c) for c in CELLS]
-    print("\n===== TRANSPLANT VERDICT (slack interior test) =====")
-    print(f"{'cell':12s}{'plateau':>9}{'src_lam':>9}{'sgdm_settle':>12}{'verdict':>10}{'sgd_ctl':>9}")
+    print("\n===== k(R) VERDICT (restoring rate vs R; PARK = k~drift-null, RETURN = k>>null) =====")
+    print(f"{'cell':16s}{'R':>3}{'plateau':>8}{'null':>8} | per-source SGDM k (frac: k)")
     for r in allres:
-        for s in r["sources"]:
-            print(f"{r['name']:12s}{r['plateau_lam']:9.1f}{s['src_lam']:9.1f}{s['settled_sgdm']:12.1f}"
-                  f"{s['verdict']:>10}{s['ctl_verdict']:>9}")
-    print("\n PHASES: SGDM PARKs at transplanted lambda (all sources) while SGD-control RETURNs")
-    print("   -> slack interior has no restoring force (only the remote wall). Position = order param.")
-    print(" CONTINUUM: SGDM RETURNs to its plateau -> a restoring force the pulse couldn't see.")
-    print(" (loss logged alongside lambda in traces to separate lambda-relax from loss-relax.)")
+        ks = " ".join(f"{s['frac']}:{s['k_sgdm']:.4f}" for s in r["sources"])
+        print(f"{r['name']:16s}{r['R']:>3}{r['plateau']:8.1f}{r['drift_null']:8.4f} | {ks}")
+    print("\n PHASE: SGDM k ~ drift_null (PARK) across sources+seeds, from above AND below plateau, at")
+    print("   finite R, while SGD-ctl k >> null. CONTINUUM: k decays smoothly toward null without reaching.")
+    print(" Below-plateau (0.85x) is decisive: park-down => slack; climb-up => attractor (revise phase).")
 
 
 if __name__ == "__main__":
