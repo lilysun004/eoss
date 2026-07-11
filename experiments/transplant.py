@@ -119,7 +119,12 @@ def run_cell(name, batch, lr, sgdm_params, N=1200, probe=512):
     # the wall. (Late SGD sources at lam~edge overshoot SGDM's wall -> only catapult; useless for the
     # interior test.) For each target, take the SGD checkpoint whose lam is closest.
     lams = np.array([c["lam"] for c in sgd_ck])
-    targets = [1.2 * plateau_lam, 1.5 * plateau_lam, 2.0 * plateau_lam]
+    # INTERIOR-targeted (metastable interior is narrow; 1.2-2x overshot into the wall). Fine sources
+    # just above plateau probe the flat slack region; env EOSS_WIDE=1 keeps the old wall-spanning set.
+    if os.environ.get("EOSS_WIDE") == "1":
+        targets = [1.2 * plateau_lam, 1.5 * plateau_lam, 2.0 * plateau_lam]
+    else:
+        targets = [1.05 * plateau_lam, 1.12 * plateau_lam, 1.20 * plateau_lam, 1.32 * plateau_lam]
     idxs = sorted(set(int(np.argmin(np.abs(lams - t))) for t in targets))
     res = dict(name=name, batch=batch, lr=lr, beta=beta, plateau_lam=plateau_lam, sigma=sigma,
                warm=warm, sources=[])
