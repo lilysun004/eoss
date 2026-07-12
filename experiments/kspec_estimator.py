@@ -22,11 +22,11 @@ import numpy as np
 from scipy import signal
 
 
-def _welch_transfer(x, y, nperseg):
+def _welch_transfer(x, y, nperseg, noverlap=None):
     """|T_hat(w)| = |S_xy/P_xx| with Welch averaging; returns (freqs_rad, |T|, weight P_xx, coh)."""
-    f, Pxx = signal.welch(x, detrend="constant", nperseg=nperseg)
-    _, Pyy = signal.welch(y, detrend="constant", nperseg=nperseg)
-    _, Sxy = signal.csd(x, y, detrend="constant", nperseg=nperseg)
+    f, Pxx = signal.welch(x, detrend="constant", nperseg=nperseg, noverlap=noverlap)
+    _, Pyy = signal.welch(y, detrend="constant", nperseg=nperseg, noverlap=noverlap)
+    _, Sxy = signal.csd(x, y, detrend="constant", nperseg=nperseg, noverlap=noverlap)
     w = 2 * np.pi * f                       # rad/step, [0, pi]
     T = np.abs(Sxy) / np.maximum(Pxx, 1e-300)
     coh = np.abs(Sxy) ** 2 / np.maximum(Pxx * Pyy, 1e-300)
@@ -35,6 +35,22 @@ def _welch_transfer(x, y, nperseg):
 
 def _integral(T, weight):
     return float(np.sum(T * weight) / np.maximum(np.sum(weight), 1e-300))
+
+
+def _bootstrap_ci(gu, su, lam_med, nperseg, n_boot=200, seed=0):
+    """Circular block bootstrap over the plateau: resample contiguous length-nperseg blocks,
+    Welch with noverlap=0 so each segment IS one contiguous original block (no stitch artifacts),
+    recompute the spectral-integral kappa_spec. Returns (2.5%, 97.5%) percentiles."""
+    rng = np.random.default_rng(seed)
+    n = len(gu); L = nperseg; nblocks = max(2, n // L)
+    vals = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, n - L + 1, size=nblocks)
+        gg = np.concatenate([gu[i:i + L] for i in idx])
+        ss = np.concatenate([su[i:i + L] for i in idx])
+        _, T, P, _ = _welch_transfer(gg, ss, L, noverlap=0)
+        vals.append(lam_med * _integral(T, P))
+    return float(np.percentile(vals, 2.5)), float(np.percentile(vals, 97.5))
 
 
 def _r1(x):
@@ -52,9 +68,15 @@ def analyze_cell(cell_dir, nperseg_cap=2048):
     win = np.isfinite(gu0) & np.isfinite(gu) & np.isfinite(su) & np.isfinite(lam)
     if win.sum() < 512:
         return dict(cell=os.path.basename(cell_dir), ok=False, why=f"window too short ({win.sum()})")
+    gbs = z["gbs"][win] if "gbs" in z else None
     gu, su, gu0, su0, lam = gu[win], su[win], gu0[win], su0[win], lam[win]
     dxu = dxu[win] if dxu is not None else None
     n = len(gu)
+    # stationarity (registered criterion, raw kappa only): thirds of the window, |t3/t1 - 1| < 0.10
+    kap_w = meta["lr"] * lam
+    t1 = float(np.median(kap_w[:n // 3])); t3 = float(np.median(kap_w[2 * n // 3:]))
+    drift = t3 / t1 - 1 if t1 else float("nan")
+    gbs_med = float(np.nanmedian(gbs)) if gbs is not None else float("nan")
     nperseg = int(min(nperseg_cap, 2 ** np.floor(np.log2(max(n // 6, 256)))))
     lam_med = float(np.median(lam))
     lr = meta["lr"]
@@ -63,6 +85,12 @@ def analyze_cell(cell_dir, nperseg_cap=2048):
     kspec = lam_med * _integral(T, Pgg)
     omega_star = _integral(w, Pgg)                      # PSD-weighted centroid, reporting only
     gain = _integral(T, Pgg) / lr                       # |T|/lr, dimensionless measured gain
+    ci_lo, ci_hi = _bootstrap_ci(gu, su, lam_med, nperseg)
+    # omega-resolution flag: if most spectral weight sits in the lowest 3 bins, the DC peak is
+    # unresolved at this window length (df = 2pi/nperseg) -> gain near w=0 is unreliable, FLAG
+    # rather than report a mis-estimated gain (LESSONS: estimator edge-sensitivity at the DC end).
+    lowfrac = float(np.sum(Pgg[:3]) / np.maximum(np.sum(Pgg), 1e-300))
+    res_limited = bool(lowfrac > 0.5)
 
     # robustness variants
     kspec_coh = lam_med * _integral(T, Pgg * (coh > 0.5))          # coherence-masked
@@ -85,10 +113,14 @@ def analyze_cell(cell_dir, nperseg_cap=2048):
                 seed=meta.get("seed"), status=meta["status"], diverged=meta.get("diverged"),
                 n_window=n, nperseg=nperseg,
                 lam_med=lam_med, kappa_raw=lr * lam_med,
+                kappa_drift=float(drift), stationary=bool(abs(drift) < 0.10),
+                gbs_med=gbs_med,
                 r1_dxu=_r1(dxu) if dxu is not None else _r1(np.diff(np.cumsum(gu))),
                 omega_star=omega_star, omega_star_over_pi=omega_star / np.pi,
                 gain=gain,
-                kappa_spec=kspec, kappa_spec_coh=kspec_coh, kappa_spec_dxw=kspec_dxw,
+                kappa_spec=kspec, kappa_spec_ci_lo=ci_lo, kappa_spec_ci_hi=ci_hi,
+                dc_lowfrac=lowfrac, res_limited=res_limited,
+                kappa_spec_coh=kspec_coh, kappa_spec_dxw=kspec_dxw,
                 kappa_spec_fixed=kspec_fixed, kappa_spec_h1=ks1, kappa_spec_h2=ks2)
 
 

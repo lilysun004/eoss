@@ -147,6 +147,41 @@ def run(cells, concurrency):
     print("[run] all cells complete", flush=True)
 
 
+def anchor():
+    """Nesterov SANITY ANCHOR (registered STOP gate, KSPEC_PREREG_ANNOTATIONS.md ruling 3):
+    before ANY trio kappa_spec is computed, the harness must replicate the paper's Nesterov
+    large-batch threshold -- b2048 raw plateau kappa within 15% of 2(1+beta)/(1+2beta).
+    Small-batch positions are reported informationally only (SGDM b8 already sits above its DC
+    law, a known harness-wide feature, not Nesterov-specific). Writes trio_anchor.json."""
+    out = dict(anchor_pass=False, cells={})
+    for tag in [f"L_nest_b2048_beta0.9_s{s}" for s in range(SEEDS)]:
+        d = os.path.join(OUT, tag)
+        try:
+            m = json.load(open(os.path.join(d, "meta.json")))
+            z = np.load(os.path.join(d, "dense.npz"))
+        except Exception:
+            print(f"[anchor] {tag}: missing -- run the trio first"); return
+        k = m["lr"] * z["lam_batch"]; n = len(k); kap = float(np.nanmedian(k[int(n * 0.5):]))
+        beta = m["beta"]; pred = 2 * (1 + beta) / (1 + 2 * beta)
+        ratio = kap / pred
+        out["cells"][tag] = dict(kappa=kap, pred=pred, ratio=ratio)
+        print(f"[anchor] {tag}: kappa={kap:.3f} vs paper 2(1+b)/(1+2b)={pred:.3f} "
+              f"ratio={ratio:.3f} {'OK' if abs(ratio - 1) <= 0.15 else 'OUT'}")
+    ratios = [c["ratio"] for c in out["cells"].values()]
+    out["anchor_pass"] = bool(ratios and all(abs(r - 1) <= 0.15 for r in ratios))
+    # informational small/mid-batch positions (no stop semantics)
+    for tag in [f"L_nest_b8_beta0.9_s{s}" for s in range(SEEDS)] + \
+               [f"L_nest_b128_beta0.9_s{s}" for s in range(SEEDS)]:
+        d = os.path.join(OUT, tag)
+        if os.path.exists(os.path.join(d, "dense.npz")):
+            m = json.load(open(os.path.join(d, "meta.json")))
+            z = np.load(os.path.join(d, "dense.npz"))
+            k = m["lr"] * z["lam_batch"]; n = len(k)
+            print(f"[anchor-info] {tag}: kappa={float(np.nanmedian(k[int(n * 0.5):])):.3f}")
+    json.dump(out, open(os.path.join(OUT, "trio_anchor.json"), "w"), indent=1)
+    print(f"[anchor] ANCHOR {'PASS' if out['anchor_pass'] else 'FAIL -- STOP, debug before any trio kappa_spec'}")
+
+
 def status(cells):
     for c in build_cells(cells):
         mp = os.path.join(OUT, c["tag"], "meta.json")
@@ -161,10 +196,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--preflight", action="store_true"); ap.add_argument("--run", action="store_true")
     ap.add_argument("--status", action="store_true"); ap.add_argument("--trio", action="store_true")
+    ap.add_argument("--anchor", action="store_true")
     ap.add_argument("--concurrency", type=int, default=3)
     a = ap.parse_args()
     cells = TRIO if a.trio else LADDER
-    if a.preflight:
+    if a.anchor:
+        anchor()
+    elif a.preflight:
         preflight(cells)
     elif a.run:
         run(cells, a.concurrency)
