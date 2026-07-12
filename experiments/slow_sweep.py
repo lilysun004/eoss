@@ -43,7 +43,8 @@ FIELDS = ["step", "loss", "gbs", "kappa", "lam_batch", "a_t", "alpha_g", "grad_n
           # transfer T and operating frequency omega* live in the PHASE, destroyed by |cos|).
           # gu/su/mu = g/s/m . u_B (in-frame, this step's u); gu0/su0 = onto a FROZEN reference u0
           # (fixed-frame -- must agree with in-frame at large batch, diverge at small = estimator debug).
-          "gu", "su", "mu", "gu0", "su0"]
+          # dxu = (theta_{t+1}-theta_t) . u_B = APPLIED-step projection (independent cross-check of su).
+          "gu", "su", "mu", "gu0", "su0", "dxu"]
 
 
 def _rnoise(net, loss_fn, X, Y, batch, memory, n_noise=5):
@@ -63,7 +64,7 @@ def _rnoise(net, loss_fn, X, Y, batch, memory, n_noise=5):
 
 def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=40000,
              warmup=6000, stride=1, seed=0, lam_full_every=100, rnoise_every=400,
-             flush_every=2000, div_cap=1e6, n_power=6):
+             flush_every=2000, div_cap=1e6, n_power=6, u0_at=0):
     t0 = time.time()
     cell = os.path.join(out_dir, tag); os.makedirs(cell, exist_ok=True)
     meta_path = os.path.join(cell, "meta.json")
@@ -131,8 +132,8 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
             # without this the period-2 sign-flip -- the whole kappa_spec signal -- is scrambled).
             if u_prev is not None and float(T.dot(u, u_prev)) < 0:
                 u = -u
-            if u0 is None:
-                u0 = u.clone()                                  # freeze reference frame at first measure
+            if u0 is None and step >= u0_at:
+                u0 = u.clone()          # freeze reference frame at first measure past u0_at (plateau start)
             gbs = sHs / A if abs(A) > 1e-15 else float("nan")
             kappa = lr * lam if np.isfinite(lam) else float("nan")
             a_t = 1.0 - lr * (sHs / ss) if ss > 1e-24 else float("nan")
@@ -148,7 +149,10 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
             # SIGNED in-frame projections onto the sign-aligned u (unit); fixed-frame onto frozen u0
             dense["gu"].append(float(T.dot(gd, u))); dense["su"].append(float(T.dot(s, u)))
             dense["mu"].append(float(T.dot(m, u)))
-            dense["gu0"].append(float(T.dot(gd, u0))); dense["su0"].append(float(T.dot(s, u0)))
+            if u0 is not None:
+                dense["gu0"].append(float(T.dot(gd, u0))); dense["su0"].append(float(T.dot(s, u0)))
+            else:
+                dense["gu0"].append(float("nan")); dense["su0"].append(float("nan"))
             u_prev = u.clone()
             if len(dense["step"]) % lam_full_every == 0:
                 Xs, Ys = X[:2048], Y[:2048]; los = loss_fn(net(Xs).squeeze(-1), Ys)
@@ -160,10 +164,13 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
                 rn, tn = _rnoise(net, loss_fn, X, Y, batch, memory)
                 sparse["rn_step"].append(step); sparse["R_noise"].append(rn); sparse["tau_noise"].append(tn)
         # optimizer step from already-computed grads (no second backward)
+        th_pre = flatt([p.detach() for p in params]) if measure else None   # cat copies -> safe snapshot
         opt.zero_grad()
         for p, gr in zip(params, grads):
             p.grad = gr.detach()
         opt.step(); step += 1
+        if measure:
+            dense["dxu"].append(float(T.dot(flatt([p.detach() for p in params]) - th_pre, u)))
         # catapult budget
         if step >= warmup and step % 200 == 0:
             ncat = len(L.detect_catapults(np.array(dense["loss"], float)))
@@ -187,7 +194,8 @@ if __name__ == "__main__":
     ap.add_argument("--out_dir", default=os.path.join(_REPO, "results", "slow_sweep"))
     ap.add_argument("--catapult_target", type=int, default=25); ap.add_argument("--max_steps", type=int, default=40000)
     ap.add_argument("--warmup", type=int, default=6000); ap.add_argument("--stride", type=int, default=1)
+    ap.add_argument("--u0_at", type=int, default=0)
     a = ap.parse_args()
     run_cell(a.tag, a.optn, a.beta, a.batch, a.lr, a.out_dir, a.catapult_target, a.max_steps,
-             a.warmup, a.stride, a.seed)
+             a.warmup, a.stride, a.seed, u0_at=a.u0_at)
     print(f"[slow_sweep] {a.tag} done")
