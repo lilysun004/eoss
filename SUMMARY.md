@@ -8,19 +8,19 @@ num_data=2048, MSE, CPU. Code under `experiments/`; results (gitignored) under `
 
 ## The answer in one paragraph
 
-The operating point (top sharpness λ, or dimensionless κ = η·λ) is set by a **constrained
-optimization**: GD-at-EoS implicitly solves `min L s.t. sharpness ≤ edge`. Two KKT regimes:
-**marginal** = the stability constraint is **active** (κ pinned *at* the edge, GBS = 2 is the
-saturation condition read off the path, Lagrange multiplier > 0); **metastable** = the constraint is
-**slack** (κ parked in the interior, set by drive-exhaustion, not by stability). A single dimensionless
-control parameter **R = state-memory / unstable-direction-rotation-time = (1/(1−β)) / τ_rot** decides
-which: R ≲ 1 → active (SGD, large-batch momentum); R ≫ 1 → slack (small-batch momentum & Adam). The
-buffer's role is sharp and surprising: **it moves the house, not the weather** — the noise-driven
-fluctuation field is optimizer-independent, and the buffer only sets *where* the system parks within
-it. The order parameter is the multiplier (shadow price of stability), which is why a genuine binary
-coexists with perfectly continuous fluctuations. The north-star universal scalar (GBS = 2) exists
-**exactly on the active branch**; off it, position isn't a stability quantity, so no stability metric
-pins it.
+The operating point (top sharpness λ, or dimensionless κ = η·λ) is a **regulated attractor for every
+optimizer** — displaced λ is restored to it from both above and below (verified causally, see Part IV)
+— but **where** that attractor sits is set by the buffer. SGD and large-batch momentum are pinned *at*
+the stability edge (GBS = 2, the saturation condition read off the path); small-batch momentum & Adam
+are regulated to a point **5× below** the edge. A single dimensionless control parameter **R = state-
+memory / unstable-direction-rotation-time = (1/(1−β)) / τ_rot** sets the position continuously (R ≲ 1 →
+at edge; R ≫ 1 → far below). The buffer's role is sharp and surprising: **it moves the house, not the
+weather** — the noise-driven fluctuation field is optimizer-independent (identical SGD vs momentum at
+matched batch), and the buffer only relocates *where* the regulated point sits within it. This is an
+**R-continuum, not two phases**: a candidate KKT "constraint-slack" (force-free) regime at high R was
+tested directly and **overturned** — the sub-edge point is a genuine restoring attractor, not a parking
+lot. The north-star universal scalar (GBS = 2) exists **exactly where the stability constraint binds
+(at the edge)**; off it, position is loss-geometry + buffer, not a pure stability quantity.
 
 ---
 
@@ -60,17 +60,20 @@ statistics **cannot** answer the phases-vs-continuum question — which is why t
 kicks. (β0.99 b8 is a real **dead/no-window** region of the map: diverges > 2e-4, crawls κ≈0.02 below —
 at R≈90 even the basin disappears.)
 
-## Part III — The KKT frame (why position vs weather is exactly the right split)
+## Part III — Why position is buffer-set (the mechanism)
 
 Quasi-potential picture: `dλ/dt ≈ α(λ) − c·E[x²](λ)`, α = progressive-sharpening drive, E[x²] =
 amplitude of the unstable coordinate (cubic self-stabilization, Damian et al.). E[x²] needs
 *amplification*, which needs coupling to u_B. **SGD couples** (fresh gradient tracks u_B) → E[x²] walls
-up as λ→edge → constraint **active**, κ* pinned at the edge. **Small-batch momentum can't couple**
-(R≫1, buffer averages over a fast-rotating u_B) → no amplification wall → κ* set by where the *drive*
-dies (α→0: interpolation/alignment saturation) in the **slack interior**. The two regimes are the
-inequality active vs slack — an LP-style binary, order parameter = the multiplier, coexisting with
-continuous weather. `κ* = min(κ_constraint [=edge, computable, GBS=2], κ_exhaustion [loss-geometry +
-history, not a stability quantity])`.
+up as λ→edge → κ* pinned at the edge (GBS = 2). **Small-batch momentum can't couple** (R≫1, buffer
+averages over a fast-rotating u_B) → the amplification is weaker → κ* is regulated to a point far below
+the edge (`κ* = min(edge, exhaustion-point)`, exhaustion set by loss-geometry/alignment saturation).
+**Correction (the audit that killed a nicer story):** an earlier version of this section framed the two
+ends as a KKT **active-vs-slack** binary (constraint active at the edge, *force-free slack* interior at
+high R) with the Lagrange multiplier as an order parameter. The direct park-vs-attractor test (Part IV)
+**refuted the slack half** — the high-R point is a restoring attractor, not force-free — so this is a
+**continuum** in where the regulated point sits, not a phase binary. The mechanism above still holds
+(coupling strength, set by R, moves the attractor); only the "slack phase" language is retracted.
 
 ## Part IV — Causal tests of the constraint (the decisive layer)
 
@@ -97,18 +100,25 @@ ill-posed, not merely rotation-contaminated). So we probe the **slow variable** 
 
   | cell | R | SGDM k / drift-null (max) | reading |
   |---|---|---|---|
-  | b8 β0.9, b32 β0.9 | **9** | **0.0, 0.7** | **PARK** — force-free (k ≤ null); SGD-twin climbs 2–4× (→196, →355) |
-  | b128 β0.9 | 3 | 5.4 | weak restoring emerging |
-  | b8 β0.6, b32 β0.6 | 2 | 4.6, 4.2 | weak restoring (source-mixed) |
+  | b8 β0.9, b32 β0.9 | **9** | 0.0, 0.7 | looked like PARK — **but a thin all-λ≈85 ladder** (SGD λ starts above plateau) |
+  | b128 β0.9 | 3 | 5.4 | mixed |
+  | b8 β0.6, b32 β0.6 | 2 | 4.6, 4.2 | mixed |
 
-  **A real, monotonic k(R): force-free at R≈9 (both batches — R-driven, not cell-specific) rising to weak
-  restoring at R≲3.** The metastable slack is thus a genuine **force-free region** at high R (the deep
-  endpoint is corroborated across two batches, no longer a knife-edge single source), with PARK stated as
-  a *timescale bound* (restoring timescale, if any, > ~1/null ≈ several ×10³ steps ≫ the SGD twin's). But
-  the low-R cells only *weakly* restore (k ~4–5× null, mixed across sources), so it is a **smooth
-  R-crossover, not a sharp phase boundary.** *Caveats:* the per-cell source ladder is thin (SGD λ starts
-  *above* the SGDM plateau → few interior sources and **no below-plateau park-down arm** — the most
-  discriminating test — for these cells); firming needs cells whose plateau sits above init curvature.
+  The k(R) run *looked* like a force-free region at high R — **but three audits overturned it.** (i) The
+  "MIXED" β0.6 cells actually **converge to one attractor** (~105) from both sides — the low k was a
+  `fit_k`-target artifact (it targeted the training-tail plateau, not the true settle point). (ii) SGDM
+  κ0 is **reproducible across seeds** (CV≈0.003, as tight as SGD) — not a scattered parking lot. (iii)
+  The k(R) ladders were thin (few interior sources, no below-plateau arm) so "parks near source" couldn't
+  be told from "attractor near source."
+- **Decisive PARK-vs-ATTRACTOR test `park_test.py` (the real answer):** sources from SGDM's *own* descent
+  span the plateau **both ways** (λ 46→102 vs plateau 65), transplanted into fresh SGDM with **zeroed AND
+  pre-warmed buffer**, N=6000, readout = slope d(settle)/d(source) (≈1 park/slack, ≈0 attractor). Result,
+  **both R≈9 cells**: every source — far below *and* far above the plateau — **returns to the plateau**
+  (b8: 47→67, 102→64; b32: 62→87, 106→86), **slope = −0.05 / −0.01 → ATTRACTOR**, and the **pre-warmed
+  buffer agrees** (not a zeroed-buffer transient). So the metastable operating point is a **genuine
+  regulated attractor** — λ is restored from both sides — **not a force-free slack region.** The earlier
+  "PARK at 75" was the thin-ladder artifact (all sources near the attractor). **The force-free phase is
+  overturned.**
 
 ## Part V — The instrument graveyard (a real methods contribution)
 
@@ -124,15 +134,15 @@ matched-batch control; the one analysis that included it is the one that survive
 - **Solid:** the R-map; GBS = 2 at the edge including large-batch momentum; the weather-universality
   (buffer moves the house not the weather); the KKT frame; the marginal F(δλ) with measured walls
   (return 0.7–1.0, wall eps≈0.5).
-- **Resolved (k(R) test):** the metastable **force-free region is verified as a region**, not a
-  knife-edge — **both** R≈9 cells (b8 *and* b32, β0.9) PARK with restoring rate at/below the drift-null
-  floor while their SGD twins sharpen 2–4×, so it is **R-driven, not cell-specific**. Restoring rises
-  monotonically as R falls (k/null: 0 → 0.7 → 5.4 → 4.6 → 4.2 across R = 9,9,3,2,2), but only *weakly*
-  at low R — so the honest picture is **R-continuum whose high-R endpoint is a genuine force-free
-  (KKT-slack) region, with a smooth crossover, not a sharp thermodynamic phase boundary.** *Remaining
-  caveat:* the below-plateau "park-down" arm (KKT-slack's strongest prediction) was unavailable here
-  (SGD's λ starts above the SGDM plateau); confirming park-*down* needs cells whose plateau sits above
-  init curvature (or a flatter-than-plateau source), and is the one clean follow-up.
+- **Resolved (park-vs-attractor test — the real freeze):** there is **no force-free / KKT-slack phase.**
+  The metastable operating point is a **regulated attractor** — displaced λ returns to it from both below
+  and above, at R≈9, both batches, and robust to buffer pre-warming (slope d(settle)/d(source) ≈ 0). So
+  the final picture is a clean **R-continuum**: *every* optimizer regulates λ to an attractor; the buffer
+  (via R) sets *where* that attractor sits — continuously from the edge (R≲1) to ~5× below (R≫1) — not
+  *whether* restoring exists. The earlier "phases" reading was a measurement artifact (thin ladder +
+  wrong `fit_k` target), caught by the audits before it shipped. What stands, robustly: **the position
+  is buffer-set while the weather is not** ("moves the house, not the weather"), and **GBS = 2 is the
+  universal edge signature wherever the constraint binds.**
 - **North star:** the dream "one scalar = const for all optimizers/batches" does **not** hold
   unconditionally — but the *conditional* universal exists exactly where the stability constraint binds:
   **at the edge ⟺ GBS = 2**, optimizer-agnostic and path-computable. Whether a given (optimizer, batch)
