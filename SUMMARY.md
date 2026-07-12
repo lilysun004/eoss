@@ -1,5 +1,11 @@
 # Edge of Stochastic Stability — Findings Report
 
+> ⚠️ **ARCHIVE / detailed historical record.** New here? Start with **`HANDOFF.md`**, then
+> **`KSPEC_DESIGN.md`** (the live thread) and **`LESSONS.md`**. The "metastable **phase**" language in
+> Parts III/IV/VI below was **RETRACTED** — the sub-edge point is a *regulated attractor*, not a
+> force-free phase (park-vs-attractor test), and R = memory/τ_rot was rejected in favor of a saturating
+> min → κ_spec. Read this doc for *how* claims were tested and killed, not for current claims.
+
 *Branch `lily`. What controls where a stochastic optimizer's sharpness parks, and is there a universal
 path-computable signature of the edge for any optimizer. Lean setup: CIFAR-10, `mlp_s` (789k params),
 num_data=2048, MSE, CPU. Code under `experiments/`; results (gitignored) under `results/`.*
