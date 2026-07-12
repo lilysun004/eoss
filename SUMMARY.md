@@ -150,6 +150,18 @@ between.*
   wrong `fit_k` target), caught by the audits before it shipped. What stands, robustly: **the position
   is buffer-set while the weather is not** ("moves the house, not the weather"), and **GBS = 2 is the
   universal edge signature wherever the constraint binds.**
+- **R is a strong but *approximate* axis (iso-R test):** holding R fixed and moving β and B together,
+  position is *not* constant — along-iso-R / across-R variance ratio ≈ **0.5–0.6** (free 70-cell test
+  0.58; designed R~2 contour 0.50), failing the pre-registered tight-pin criterion (<0.3). Position
+  tracks R *direction* robustly (higher R → lower position) but with real residual, so the honest claim
+  is **"R is the best single organizing axis, not a precise law"** — a measured monotone f(memory/
+  rotation), not a tight functional. Mechanism audit (house standard): instantaneous step-alignment does
+  *not* mediate (attenuated/artifact); energy-weighted *coherent coupling* partially mediates on the
+  decorrelated position (λ_full) but R **keeps a strong direct effect** (partial −0.71) — coupling is a
+  real partial proximate variable, not the whole story, and the specific functional is hypothesis-
+  generating (needs out-of-sample confirmation; the designed contours were under-powered, 6/14 live,
+  high-β large-batch cells need live-lr search). Coupling is *tighter* along contours than position, so
+  the residual localizes to the coupling→position link.
 - **The open question the retraction *created* (future-work centerpiece):** the attractor result is
   *stranger* than the slack story it replaced. Something restores λ to ~65 **from above** in a cell whose
   stability edge is ~5× away, **and from below** with no visible sharpening drive, reproducibly across
