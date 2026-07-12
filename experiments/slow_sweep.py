@@ -38,7 +38,12 @@ from utils.measure import (compute_eigenvalues, EigenvectorCache, create_hessian
 T.set_num_threads(int(os.environ.get("EOSS_THREADS", "4")))
 
 FIELDS = ["step", "loss", "gbs", "kappa", "lam_batch", "a_t", "alpha_g", "grad_norm", "step_norm",
-          "buf_norm", "cos_uu", "cos_bu", "cos_gu", "cos_su", "cos_bg", "cos_sg"]
+          "buf_norm", "cos_uu", "cos_bu", "cos_gu", "cos_su", "cos_bg", "cos_sg",
+          # SIGNED per-step projections onto the sign-aligned in-frame u_B (for kappa_spec: the
+          # transfer T and operating frequency omega* live in the PHASE, destroyed by |cos|).
+          # gu/su/mu = g/s/m . u_B (in-frame, this step's u); gu0/su0 = onto a FROZEN reference u0
+          # (fixed-frame -- must agree with in-frame at large batch, diverge at small = estimator debug).
+          "gu", "su", "mu", "gu0", "su0"]
 
 
 def _rnoise(net, loss_fn, X, Y, batch, memory, n_noise=5):
@@ -69,7 +74,7 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
     params = [p for p in net.parameters() if p.requires_grad]
     memory = 1.0 / (1.0 - beta) if beta > 0 else 1.0
     is_mom = beta > 0
-    cache = EigenvectorCache(1); u_prev = None
+    cache = EigenvectorCache(1); u_prev = None; u0 = None   # u0 = frozen reference frame
     dense = {k: [] for k in FIELDS}
     sparse = dict(lf_step=[], lam_full=[], rn_step=[], R_noise=[], tau_noise=[])
     gen = T.Generator().manual_seed(1000 + seed)
@@ -122,6 +127,12 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
                 lam = float(T.dot(u, hvp(u, retain_graph_override=True)))   # Rayleigh quotient
             finally:
                 hvp.free_memory()
+            # sign-align the per-step eigvec to the previous frame (power iteration returns +-u;
+            # without this the period-2 sign-flip -- the whole kappa_spec signal -- is scrambled).
+            if u_prev is not None and float(T.dot(u, u_prev)) < 0:
+                u = -u
+            if u0 is None:
+                u0 = u.clone()                                  # freeze reference frame at first measure
             gbs = sHs / A if abs(A) > 1e-15 else float("nan")
             kappa = lr * lam if np.isfinite(lam) else float("nan")
             a_t = 1.0 - lr * (sHs / ss) if ss > 1e-24 else float("nan")
@@ -133,7 +144,12 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
             dense["cos_uu"].append(M.cosabs(u, u_prev) if u_prev is not None else float("nan"))
             dense["cos_bu"].append(M.cosabs(m, u)); dense["cos_gu"].append(M.cosabs(gd, u))
             dense["cos_su"].append(M.cosabs(s, u)); dense["cos_bg"].append(M.cosabs(m, gd))
-            dense["cos_sg"].append(M.cosabs(s, gd)); u_prev = u.clone()
+            dense["cos_sg"].append(M.cosabs(s, gd))
+            # SIGNED in-frame projections onto the sign-aligned u (unit); fixed-frame onto frozen u0
+            dense["gu"].append(float(T.dot(gd, u))); dense["su"].append(float(T.dot(s, u)))
+            dense["mu"].append(float(T.dot(m, u)))
+            dense["gu0"].append(float(T.dot(gd, u0))); dense["su0"].append(float(T.dot(s, u0)))
+            u_prev = u.clone()
             if len(dense["step"]) % lam_full_every == 0:
                 Xs, Ys = X[:2048], Y[:2048]; los = loss_fn(net(Xs).squeeze(-1), Ys)
                 lf = float(compute_eigenvalues(los, net, k=1, max_iterations=60, reltol=0.01,
