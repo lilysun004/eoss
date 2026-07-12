@@ -126,14 +126,21 @@ Fast/noise statistics that each looked promising and each died to a control: γ-
 small batch), AR-pole (u rotates), frozen-cocycle-at-a-point (oscillation-confounded), burstiness
 (detector artifact), event rate (baseline-variance artifact), excursion tails (track batch not buffer),
 sharpening-suppression (drive dead near interpolation). The pattern: **fast statistics carry noise
-information, not regime information.** The lesson (now a rule): no instrument ships without a
-matched-batch control; the one analysis that included it is the one that survived.
+information, not regime information.** And every *false headline* shared one signature — a conclusion
+drawn from a measurement that **couldn't distinguish the hypothesis from its alternative** (thin ladder:
+park vs attractor-at-source; detector dead-time: regular vs clustered; absolute threshold: quiet vs
+different-baseline). Every audit that killed one was the same move: **widen the measurement until the
+alternatives separate** (span the target both ways; shrink the dead-time; fluctuation-scale the
+threshold; add the matched-batch control). That is the transferable rule, sharper than "no instrument
+without a control": *don't conclude from an instrument that can't resolve the two things you're deciding
+between.*
 
 ## Part VI — Honest state & the north-star answer
 
 - **Solid:** the R-map; GBS = 2 at the edge including large-batch momentum; the weather-universality
-  (buffer moves the house not the weather); the KKT frame; the marginal F(δλ) with measured walls
-  (return 0.7–1.0, wall eps≈0.5).
+  (buffer moves the house not the weather); the constrained-optimization *mechanism* (Part III — with
+  the active-vs-slack *phase* framing retracted); the marginal F(δλ) with measured walls (return 0.7–1.0,
+  wall eps≈0.5); the sub-edge point is a **regulated attractor** (park-vs-attractor test).
 - **Resolved (park-vs-attractor test — the real freeze):** there is **no force-free / KKT-slack phase.**
   The metastable operating point is a **regulated attractor** — displaced λ returns to it from both below
   and above, at R≈9, both batches, and robust to buffer pre-warming (slope d(settle)/d(source) ≈ 0). So
@@ -143,6 +150,19 @@ matched-batch control; the one analysis that included it is the one that survive
   wrong `fit_k` target), caught by the audits before it shipped. What stands, robustly: **the position
   is buffer-set while the weather is not** ("moves the house, not the weather"), and **GBS = 2 is the
   universal edge signature wherever the constraint binds.**
+- **The open question the retraction *created* (future-work centerpiece):** the attractor result is
+  *stranger* than the slack story it replaced. Something restores λ to ~65 **from above** in a cell whose
+  stability edge is ~5× away, **and from below** with no visible sharpening drive, reproducibly across
+  seeds — and *neither* term of Part III's quasi-potential (edge amplification, progressive-sharpening
+  drive) explains restoring-from-above far from the wall. This **unidentified interior regulator**
+  (candidates: residual E[x²] coupling at the noise floor, loss-geometry curvature selection, buffer
+  equilibration dynamics) is the genuine discovery the park test made *by failing to find slack*.
+- **Terminology / a tension to own:** we retain "**metastable**" as a historical label for the sub-edge
+  regime, but note it is now a **regulated attractor, not a decaying/damping-held basin**. This does
+  raise a real tension with the early lean-run observation that small-batch momentum runs *eventually
+  diverge*: plausibly both hold — a regulated attractor with **rare noise-driven escapes over much longer
+  horizons** than the park test's window — but the attractor is what the direct causal test shows, and
+  reconciling the two quantitatively (escape-rate over long horizons) is open, not asserted here.
 - **North star:** the dream "one scalar = const for all optimizers/batches" does **not** hold
   unconditionally — but the *conditional* universal exists exactly where the stability constraint binds:
   **at the edge ⟺ GBS = 2**, optimizer-agnostic and path-computable. Whether a given (optimizer, batch)
@@ -150,6 +170,7 @@ matched-batch control; the one analysis that included it is the one that survive
   quantity — which is itself the honest final answer to why no universal stability scalar can pin it
   there.
 
-Either way the paper closes: **one constrained-optimization picture, two KKT regimes, R the parameter
-that decides whether the stability constraint can bind, and the weather-universality result as the
-evidence that the phase lives in the drift, not the noise.**
+The paper closes on: **one regulated attractor whose position R sets continuously — pinned at the edge
+where the stability constraint binds (GBS = 2), regulated below it where the buffer can't couple to the
+unstable direction — with the weather-universality result as the evidence that the physics lives in the
+drift (where the attractor sits), not the noise (which is optimizer-independent).**
