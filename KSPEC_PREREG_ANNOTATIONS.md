@@ -215,3 +215,51 @@ re-opened (reported, not patched).
 ONE estimator, ONE frame-construction rule, ALL cells: after reconciliation picks the winner,
 the at-edge calibration readings are RECOMPUTED under it; only then are the b8/beta0.99 verdicts
 and the margins (Reading A vs Reading B of ADDENDUM 2) read.
+
+---
+
+# ADDENDUM 4 (2026-07-12 ~23:00): RECONCILIATION ROUND-1 FREEZE + bracket mapping
+# (committed BEFORE the b128 divergence bracket runs)
+
+## Round-1 numbers, frozen as-measured (chain of custody; no silent updates)
+- b128_s0: (i) c*_2=1.484, (ii) c*_2=1.528 (= fixed-frame K8 reading), (iii) c*_2=1.051
+  [(iii) curve smooth: -0.0052, -0.0038, +0.0074, +0.0156, +0.0344, +0.2407 at
+  c=0.85..2.0 -- NOT the flat-then-kink floor signature]. DISAGREEMENT detected by protocol.
+- b8_beta0.9_s0 (iii), partial: gamma2 POSITIVE at c=0.85 (+0.029) and c=1.0 (+0.034) --
+  frozen-linearized loop MS-unstable at the operating point (real cell stable via nonlinear
+  regulation), pending SEs + flat-control; suspicion registered: few-replica upward bias
+  under b8's heavy-tailed M_t.
+- b8 frame non-convergence is a FINDING (methods): held-out capture 0.268 at K=8 ->
+  0.510 at K=120, K*=-1. The unstable family at b8 is not low-dimensional; the operator
+  route needs a growing frame there, (iii) is the only valid estimator -- by measurement,
+  not by branch choice.
+
+## Live hypothesis for the (i,ii)-vs-(iii) gap
+(i)/(ii) are frame-blind to per-batch 2nd/3rd stiff directions (top-1-capture criterion);
+(iii) sees them. Decisive test: top-3-per-batch enriched frame -> (i)/(ii) should DROP toward
+~1.07 (convergence from above) if frame-blindness is right.
+
+## GROUND-TRUTH BRACKET (gating item, launched first): b128 divergence bracket FROM THE
+## CHECKPOINT (theta*, buffer* restored; short horizon 3000 steps so lambda adaptation is
+## limited -- the registered clean comparator), c in {1.1, 1.3, 1.5}.
+Pre-committed mapping (temptation to re-interpret post-hoc is maximal right now):
+- DIES at ~1.1x  -> (iii) VALIDATED; plateau is MS-MARGINAL; the 50%-margin reading was a
+  frame artifact; paper's marginality claim confirmed in operator form; interior-attractor
+  question reframes as "marginality maintained by what feedback".
+- SURVIVES to ~1.5x -> margin REAL; min(wall, reach) stands; (iii) has residual
+  contamination despite the smooth curve -- hunt continues.
+- SURVIVES 1.3x but DIES 1.5x -> AMBIGUOUS (nonlinear extension precedent: old arbiter saw
+  survival ~1.6x past linear threshold). Registered follow-up: transplant-above-plateau at
+  1.2x (linear-regime displacement: relaxes back = margin real; energy grows = marginal).
+
+## (iii) quoting rule
+(iii) c*_2 is NEVER quoted bare: always alongside the flat-control tangent's apparent
+V-readout growth (bulk->V injection baseline; a partial floor shifts the crossing LEFT, and
+1.051-vs-1.15 is exactly the size such a floor produces). Quote as excess-over-control.
+
+## Framing pre-write (both endings, before the bracket chooses)
+- If MS-marginal: kappa_spec=2 certifies the coherent first-moment wall where phase survives;
+  kappa_ms=2 certifies the mean-square wall where it doesn't; "every plateau is at ITS wall,
+  binding moment order set by the coherence regime" -- the moment hierarchy returning as the
+  answer. - If margin real: kappa_spec=2 at the coherent edge + kappa_ms as the universal
+  WALL with a noise-scaled margin (deficit-vs-CV(h)^2 law) = min(wall, reach) final form.
