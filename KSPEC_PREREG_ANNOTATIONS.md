@@ -139,3 +139,41 @@ kappa_ms is the small/middle band where the confound is mild (small oscillation 
 (b) Pool bootstrap (P=384) approximates the batch distribution; robustness: re-run one cell at
 P=192 to check pool-size sensitivity. (c) b2048 is FULL batch → σ_b²=0, M_t deterministic —
 gamma_2 = gamma_1 there by construction; its kappa_ms is a consistency read, not an MS test.
+
+---
+
+# ADDENDUM 2 (2026-07-12 late session): registered BEFORE the noise-dominated gamma_2 readings
+# (b32/b8/b8-beta0.99) are seen. Seen so far: b128 (c*_2=1.52/1.53, kappa_ms=1.31, seeds agree)
+# and b2048 (c*_2=1.006, kappa_ms=1.988 both seeds -- instrument calibrates to 2 at the known
+# at-edge cell). The b128 reading already leans toward the registered failure mode.
+
+## Two registered readings for the remaining cells (both constructive, fixed in advance)
+
+- **Reading A — MS-marginality is the universal pin:** c*_2 ≈ 1 (kappa_ms ≈ 2) on the plateaued
+  noise-dominated cells. Then kappa_ms is the all-B stability scalar.
+- **Reading B — kappa_ms is the universal WALL, position = wall minus a noise-scaled margin:**
+  c*_2 > 1 tracking the cell's EMPIRICAL divergence multiplier (where training actually dies),
+  not 1. Then the certificate is validated as the wall; the plateau sits BELOW the wall by
+  margin c*_2 − 1, and the margin is the object to explain — the archived deficit-vs-CV(h)^2
+  law (r=0.895 through the origin, all optimizers) is the standing empirical candidate
+  (escape-rate/Kramers-type noise-scaled safety margin below a mean-square wall; the renewal
+  picture as a POSITION law, not a phase claim).
+- Distinguishing column (added to the report): **empirical divergence multiplier bracket** per
+  cell from existing data (old-sweep lr grids, liveness-bisect probes, Exp-2/arbiter: SGDM b8
+  stable at lr 0.0021, diverged at 0.0024 → wall ≈ 1.15× operating). Certificate VALIDATED if
+  c*_2 falls inside/near the bracket; MISSING PHYSICS if it disagrees with where cells die.
+  Caveat registered: the empirical wall confounds lambda re-adaptation at hotter lr (the frozen
+  cocycle holds lambda fixed), so brackets from lr-grid divergence are upper-bound-flavored at
+  cells where lambda adapts; the bisect-probe brackets (short horizon, less adaptation) are the
+  cleaner comparator.
+
+## Frame-capture audit — GATE on trusting the decisive cells (registered before their numbers)
+
+The pool is M = V^T H_B V with V FROZEN top-K at the checkpoint. If per-batch top directions
+u_B poke outside span(V) — the R-mechanism itself — gamma_2 under-counts energy injection and
+c*_2 biases UP at exactly the noise-dominated cells. Audit (ms_frame_audit.py): captured mass
+||V^T u_B||^2 over sample batches per cell. RULE: if median captured mass < 0.8 at a cell, its
+K=8 verdict is NOT read; re-run gamma at enlarged K (K=32) and read that instead (and if still
+<0.8 at K=32, report "frame-limited, verdict withheld"). The b128 c*_1 ≈ c*_2 "no moment
+separation" attribution (tiny fixed-u noise) is HELD until its captured-mass number is in
+(fixed-u cv2=0.015 may itself be frame-blindness).
