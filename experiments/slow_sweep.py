@@ -44,7 +44,30 @@ FIELDS = ["step", "loss", "gbs", "kappa", "lam_batch", "a_t", "alpha_g", "grad_n
           # gu/su/mu = g/s/m . u_B (in-frame, this step's u); gu0/su0 = onto a FROZEN reference u0
           # (fixed-frame -- must agree with in-frame at large batch, diverge at small = estimator debug).
           # dxu = (theta_{t+1}-theta_t) . u_B = APPLIED-step projection (independent cross-check of su).
-          "gu", "su", "mu", "gu0", "su0", "dxu"]
+          "gu", "su", "mu", "gu0", "su0", "dxu",
+          # Adam only: cos(d_t, d_ref) where d = robust P^-1/2 (adjudicator eps: 0.1*median) --
+          # the preconditioner-drift flag for the offline local-linearization check. NaN otherwise.
+          "pdrift"]
+
+
+def _adam_m_flat(opt, params):
+    """Adam first-moment buffer m (exp_avg), flat; zeros before state init."""
+    pieces = []
+    for p in params:
+        st = opt.inner.state.get(p)
+        pieces.append(st["exp_avg"].flatten() if st and "exp_avg" in st else T.zeros(p.numel()))
+    return T.cat(pieces).detach()
+
+
+def _adam_pinv(opt):
+    """Robust P^-1/2 (adjudicator protocol): d = 1/sqrt(sqrt(vhat) + 0.1*median(sqrt(vhat))).
+    Ones before state init (step 0)."""
+    try:
+        from experiments.adam_adjudicator import sqrt_vhat_flat
+        sqv = sqrt_vhat_flat(opt)
+        return (1.0 / (sqv + 0.1 * float(sqv.median())).sqrt()).detach()
+    except Exception:
+        return None
 
 
 def _rnoise(net, loss_fn, X, Y, batch, memory, n_noise=5):
@@ -70,11 +93,14 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
     meta_path = os.path.join(cell, "meta.json")
     T.manual_seed(seed)
     X, Y = L.get_data(); net, loss_fn = L.build()
-    params_dict = {} if optn == "SGD" else {"beta": beta}
+    params_dict = ({} if optn == "SGD" else
+                   ({"beta1": beta, "beta2": 0.99} if optn == "Adam" else {"beta": beta}))
     opt = create_optimizer(optn, net, lr, params_dict)
     params = [p for p in net.parameters() if p.requires_grad]
     memory = 1.0 / (1.0 - beta) if beta > 0 else 1.0
-    is_mom = beta > 0
+    is_adam = (optn == "Adam")
+    is_mom = beta > 0 and not is_adam
+    d_ref = None; pinv_snaps = []          # Adam: reference d for drift + sparse full snapshots
     cache = EigenvectorCache(1); u_prev = None; u0 = None   # u0 = frozen reference frame
     dense = {k: [] for k in FIELDS}
     sparse = dict(lf_step=[], lam_full=[], rn_step=[], R_noise=[], tau_noise=[])
@@ -84,7 +110,8 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
     def flush(status):
         np.savez(os.path.join(cell, "dense.npz"),
                  **{k: np.array(v, float) for k, v in dense.items()},
-                 **{k: np.array(v, float) for k, v in sparse.items()})
+                 **{k: np.array(v, float) for k, v in sparse.items()},
+                 **({"pinv_snaps": np.stack(pinv_snaps)} if pinv_snaps else {}))
         json.dump(dict(tag=tag, optn=optn, beta=beta, batch=batch, lr=lr, seed=seed,
                        status=status, steps=len(dense["step"]), n_catapults=int(ncat),
                        diverged=diverged, catapult_target=catapult_target, stride=stride,
@@ -104,7 +131,11 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
         s = opt.compute_step_direction(g, params).detach()
         measure = (step % stride == 0)
         if measure:
-            m = M.buffer_flat(opt, params) if is_mom else gd
+            m = (_adam_m_flat(opt, params) if is_adam else
+                 (M.buffer_flat(opt, params) if is_mom else gd))
+            d_pre = _adam_pinv(opt) if is_adam else None
+            if is_adam and d_pre is None:
+                d_pre = T.ones_like(gd)
             # ONE HVP graph for everything: Hs (GBS/a_t) + warm power iteration for (lam_max, u_B).
             # LOBPCG-per-step is 243ms on this 789k-param net; warm power iter (~6 HVPs) is ~10ms.
             hvp = create_hessian_vector_product(lo, net, params=params, grads=grads, flat_grads=g)
@@ -119,13 +150,19 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
                 else:
                     u = gd.clone()
                 u = u / (u.norm() + 1e-30)
+                if is_adam:
+                    u = (d_pre * gd).detach()                     # seed in whitened coords
+                    u = u / (u.norm() + 1e-30)
                 n_eff = 12 if batch <= 32 else n_power
                 for _ in range(n_eff):
-                    Hu = hvp(u, retain_graph_override=True); nrm = float(Hu.norm())
+                    Hu = (d_pre * hvp(d_pre * u, retain_graph_override=True)) if is_adam \
+                         else hvp(u, retain_graph_override=True)
+                    nrm = float(Hu.norm())
                     if nrm < 1e-20:
                         break
                     u = (Hu / nrm).detach()
-                lam = float(T.dot(u, hvp(u, retain_graph_override=True)))   # Rayleigh quotient
+                lam = float(T.dot(u, (d_pre * hvp(d_pre * u, retain_graph_override=True)) if is_adam
+                                  else hvp(u, retain_graph_override=True)))  # Rayleigh quotient
             finally:
                 hvp.free_memory()
             # sign-align the per-step eigvec to the previous frame (power iteration returns +-u;
@@ -134,6 +171,10 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
                 u = -u
             if u0 is None and step >= u0_at:
                 u0 = u.clone()          # freeze reference frame at first measure past u0_at (plateau start)
+            if is_adam:                       # whitened path observables (adjudicator convention)
+                gd_w = (d_pre * gd).detach(); s_w = (s / d_pre).detach(); m_w = (d_pre * m).detach()
+            else:
+                gd_w, s_w, m_w = gd, s, m
             gbs = sHs / A if abs(A) > 1e-15 else float("nan")
             kappa = lr * lam if np.isfinite(lam) else float("nan")
             a_t = 1.0 - lr * (sHs / ss) if ss > 1e-24 else float("nan")
@@ -143,16 +184,25 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
             dense["grad_norm"].append(float(gd.norm())); dense["step_norm"].append(float(s.norm()))
             dense["buf_norm"].append(float(m.norm()))
             dense["cos_uu"].append(M.cosabs(u, u_prev) if u_prev is not None else float("nan"))
-            dense["cos_bu"].append(M.cosabs(m, u)); dense["cos_gu"].append(M.cosabs(gd, u))
-            dense["cos_su"].append(M.cosabs(s, u)); dense["cos_bg"].append(M.cosabs(m, gd))
-            dense["cos_sg"].append(M.cosabs(s, gd))
+            dense["cos_bu"].append(M.cosabs(m_w, u)); dense["cos_gu"].append(M.cosabs(gd_w, u))
+            dense["cos_su"].append(M.cosabs(s_w, u)); dense["cos_bg"].append(M.cosabs(m_w, gd_w))
+            dense["cos_sg"].append(M.cosabs(s_w, gd_w))
             # SIGNED in-frame projections onto the sign-aligned u (unit); fixed-frame onto frozen u0
-            dense["gu"].append(float(T.dot(gd, u))); dense["su"].append(float(T.dot(s, u)))
-            dense["mu"].append(float(T.dot(m, u)))
+            dense["gu"].append(float(T.dot(gd_w, u))); dense["su"].append(float(T.dot(s_w, u)))
+            dense["mu"].append(float(T.dot(m_w, u)))
             if u0 is not None:
-                dense["gu0"].append(float(T.dot(gd, u0))); dense["su0"].append(float(T.dot(s, u0)))
+                dense["gu0"].append(float(T.dot(gd_w, u0))); dense["su0"].append(float(T.dot(s_w, u0)))
             else:
                 dense["gu0"].append(float("nan")); dense["su0"].append(float("nan"))
+            if is_adam:
+                if u0 is not None and d_ref is None:
+                    d_ref = d_pre.clone()
+                dense["pdrift"].append(float(T.dot(d_pre, d_ref) / (d_pre.norm() * d_ref.norm()))
+                                       if d_ref is not None else float("nan"))
+                if step % 4000 == 0:
+                    pinv_snaps.append(d_pre.to(T.float32).numpy())
+            else:
+                dense["pdrift"].append(float("nan"))
             u_prev = u.clone()
             if len(dense["step"]) % lam_full_every == 0:
                 Xs, Ys = X[:2048], Y[:2048]; los = loss_fn(net(Xs).squeeze(-1), Ys)
@@ -170,7 +220,8 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
             p.grad = gr.detach()
         opt.step(); step += 1
         if measure:
-            dense["dxu"].append(float(T.dot(flatt([p.detach() for p in params]) - th_pre, u)))
+            dth = flatt([p.detach() for p in params]) - th_pre
+            dense["dxu"].append(float(T.dot(dth / d_pre if is_adam else dth, u)))
         # catapult budget
         if step >= warmup and step % 200 == 0:
             ncat = len(L.detect_catapults(np.array(dense["loss"], float)))

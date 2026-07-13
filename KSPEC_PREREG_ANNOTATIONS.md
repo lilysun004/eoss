@@ -304,3 +304,26 @@ enriched-(i) stalls, quote it with its measured bias band (no indefinite converg
 FINAL TABLE RULE: the paper's kappa_ms column is recomputed for ALL cells under the single
 calibrated construction; the multi-construction numbers quoted during reconciliation are
 methods-appendix material only.
+
+---
+
+# ADDENDUM 6 (2026-07-13 ~00:50, committed BEFORE any Adam cell runs): Adam trio predictions
+
+Runner: slow_sweep Adam mode (smoke-verified: whitened dxu = su to 1e-7). Frame = LIVE per-step
+robust preconditioned geometry (adjudicator protocol: d = 1/sqrt(sqrt(vhat)+0.1*median),
+whitened observables g~=d*g, s~=s/d, m~=d*m, u from d*H_B*d power iteration). P-drift logged
+per step (cos(d_t,d_ref)) + sparse full snapshots -> offline local-linearization check (block
+the Welch analysis if drift is fast relative to the window). beta slot = beta1 = 0.9,
+beta2 = 0.99 fixed.
+
+Pre-registered predictions:
+1. Adam b2048 (at its preconditioned edge per the adjudicator arc): kappa_spec = 2 with the
+   measured gain playing a role NO formula predicts -- Adam's effective filter (beta1-EMA
+   composed with slowly-adapting 1/sqrt(vhat)) has no closed form; strongest form of the
+   zero-optimizer-math claim. Gate for Adam cells: plateau laws with beta -> beta1 (coherent
+   2(1+b1), DC 2(1-b1)) on PRECONDITIONED kappa~, per the adjudicator's kappa_precond ~ 2(1+b1)
+   finding; labeled as an assumption in the report.
+2. Adam b8 (sub-edge per adjudicator, R_precond ~ 9): kappa_spec < 2, gate sub-edge; onset
+   bracket adds its point to the margin dataset.
+Preflight: liveness-bisect from lr 0.001 (b8 validated; b128/b2048 start there), precond-kappa
+crawl floor 0.08.
