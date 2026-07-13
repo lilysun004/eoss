@@ -177,3 +177,41 @@ K=8 verdict is NOT read; re-run gamma at enlarged K (K=32) and read that instead
 <0.8 at K=32, report "frame-limited, verdict withheld"). The b128 c*_1 ≈ c*_2 "no moment
 separation" attribution (tiny fixed-u noise) is HELD until its captured-mass number is in
 (fixed-u cv2=0.015 may itself be frame-blindness).
+
+---
+
+# ADDENDUM 3 (2026-07-12, registered before any pooled-frame number is computed):
+# pooled-frame construction + three-estimator reconciliation protocol for kappa_ms
+
+Context at registration: K=8 readings seen so far -- at-edge b512/b2048 kappa_ms=1.97-1.99
+(audits 0.98/1.00 PASS), b128 kappa_ms=1.31 (audit 0.92 PASS), b32/b8/b8-beta0.99 NO CROSSING
+<= c=2 with FAILED or pending audits (b32: 0.45 @K8, 0.69 @K32 -> frame-limited, withheld).
+Eq-21 with fixed-u inputs: matches at deterministic end, scattered/seed-inconsistent at small
+batch. The frozen-single-Hessian frame is the wrong coordinates at small batch (rotating family).
+
+## Frame rule (one rule, all cells)
+V = batch-POOLED frame: top-1 eigvec of H_B for ~160 fresh construction batches (+ frozen
+full-H top-8 anchor columns), SVD-orthonormalized; K* = smallest leading-dimension with
+HELD-OUT (40 fresh batches, disjoint from construction) mean capture ||VV^T u_B||^2 >= 0.9.
+K* reported per cell (small at b2048 = degenerate family; large at b8 = spread family; if
+held-out capture does NOT converge by pool size, the operator genuinely needs the bulk ->
+explicit-operator route dies honestly, replica route (iii) is what survives).
+
+## Three estimators, trust-ordered; reconciliation BEFORE any cell is read
+ (i)  explicit pooled operator: Sigma <- E_pool[J Sigma J^T] power iteration, rho(c); direct
+      Eq-13 analogue. Projection bias UP.
+ (ii) projected replicas (current gamma_2 machinery under pooled V). Same bias direction.
+ (iii) FULL-SPACE replicas (no projection of dynamics; fresh-batch HVP per replica-step at the
+      frozen point), subspace READOUT ||V^T z||. Reference estimator.
+Protocol: run all three at b128_s0 and b8_beta0.9_s0.
+ - (i) ~ (iii) at both -> projection safe, (i) everywhere.
+ - (i) > (iii) at b8 but agree at b128 -> gap = measured frame leakage; QUOTE (iii) as c*_2.
+ - disagree at b128 -> STOP, debug pooling/bookkeeping before reading any cell.
+Sanity anchors: pooled-V at b2048 must reproduce kappa_ms ~ 2; pooled-V at b128 must match the
+K=8 c*_2=1.52-1.53 -- if it moves, the earlier "audit-clean" b128 label was too generous and is
+re-opened (reported, not patched).
+
+## Bookkeeping rule
+ONE estimator, ONE frame-construction rule, ALL cells: after reconciliation picks the winner,
+the at-edge calibration readings are RECOMPUTED under it; only then are the b8/beta0.99 verdicts
+and the margins (Reading A vs Reading B of ADDENDUM 2) read.
