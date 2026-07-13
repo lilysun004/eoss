@@ -263,3 +263,44 @@ V-readout growth (bulk->V injection baseline; a partial floor shifts the crossin
   binding moment order set by the coherence regime" -- the moment hierarchy returning as the
   answer. - If margin real: kappa_spec=2 at the coherent edge + kappa_ms as the universal
   WALL with a noise-scaled margin (deficit-vs-CV(h)^2 law) = min(wall, reach) final form.
+
+---
+
+# ADDENDUM 5 (2026-07-12 ~23:20, committed BEFORE the b8/beta0.99/b32 bracket results print;
+# those runs are already queued behind the b128 c=1.2 refinement)
+
+## Operational wall definition (three markers now in play; fixed before the decisive cell)
+c*_2-EMPIRICAL = ONSET OF VARIANCE GROWTH, not survival. Per bracket run, report three markers:
+ 1. ONSET (the linear MS wall): loss excursion above the quiet baseline within the run --
+    operationalized as max_loss > 1e3 x the source cell's plateau-loss median near the
+    checkpoint, OR final kappa < 0.9 x initial kappa (lambda shaving = regulation responding
+    to growth). The b128 readings under this rule: c=1.1 quiet (below wall), c=1.3 excited ->
+    onset in (1.1, 1.3), c*_emp ~ 1.2 +/- 0.1.
+ 2. SEVERITY (catapult size growth vs c).
+ 3. DEATH (divergence) = wall + cubic/regulation budget, NOT the linear wall (old arbiter
+    lesson: SGD survived 1.6-1.8x past linear threshold).
+Survival brackets overestimate the linear wall by a cell-dependent regulation budget.
+
+## Registered branch: REGIME-DEPENDENT Reading A/B
+Old arbiter data puts the b8 beta0.9 wall at ~1.05-1.2x operating while kappa_raw sits ~11x
+below the coherent ceiling. If the b8 ONSET lands there: a cell far below its FIRST-moment
+edge but AT/NEAR its SECOND-moment edge -- the two-moment picture confirmed at the
+noise-dominated endpoint by ground truth. Then the coherent conclusion is REGIME-DEPENDENT:
+margin ~1.2 at intermediate B (Reading B), marginal at small B (Reading A) -- the
+interior-attractor margin shrinking as noise grows. This is a registered ending, not a
+surprise to be reconciled post-hoc.
+
+## Regulation budget (new registered column, computable from brackets + old data)
+budget(cell) = survival multiplier / onset multiplier. b128 >= 1.25 (survived 1.5/onset ~1.2).
+Old SGD ~1.7. Prediction (third appearance of the R story): coherent cells have a deep cubic
+rescue budget; decohered cells a THIN one (buffer cannot couple to the shaving mechanism).
+Column to report: budget vs R.
+
+## Estimator program = calibration, not truth-source
+Enriched-(i)/(ii) and control-corrected-(iii) are now judged against measured onsets:
+enriched-(i) should drop 1.5 -> ~1.2 at b128; control-corrected (iii) should rise 1.05 -> ~1.2.
+If they meet at the empirical onset from opposite sides, reconciliation complete; if
+enriched-(i) stalls, quote it with its measured bias band (no indefinite convergence-chasing).
+FINAL TABLE RULE: the paper's kappa_ms column is recomputed for ALL cells under the single
+calibrated construction; the multi-construction numbers quoted during reconciliation are
+methods-appendix material only.
