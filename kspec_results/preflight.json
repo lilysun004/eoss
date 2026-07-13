@@ -112,5 +112,41 @@
     "note": "kappa_late 1.378, sn_slope -0.00072"
    }
   ]
+ },
+ "adam_b8": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 3.8717518310546875,
+    "note": "kappa_late 3.872, sn_slope -0.00005"
+   }
+  ]
+ },
+ "adam_b128": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 18.8576904296875,
+    "note": "kappa_late 18.858, sn_slope 0.00006"
+   }
+  ]
+ },
+ "adam_b2048": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 32.39801171875,
+    "note": "kappa_late 32.398, sn_slope 0.00007"
+   }
+  ]
  }
 }
