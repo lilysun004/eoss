@@ -1,0 +1,44 @@
+{
+ "L_nest_b128_beta0.9_s0": {
+  "kappa": 1.4664839172363282,
+  "r1": -0.9454434695267022,
+  "regime": "coherent",
+  "pred": 1.3571428571428572,
+  "gate": "at-edge"
+ },
+ "L_nest_b128_beta0.9_s1": {
+  "kappa": 1.4562950134277344,
+  "r1": -0.9254427509936195,
+  "regime": "coherent",
+  "pred": 1.3571428571428572,
+  "gate": "at-edge"
+ },
+ "L_nest_b2048_beta0.9_s0": {
+  "kappa": 1.3571946144104003,
+  "r1": -0.9996163647439678,
+  "regime": "coherent",
+  "pred": 1.3571428571428572,
+  "gate": "at-edge"
+ },
+ "L_nest_b2048_beta0.9_s1": {
+  "kappa": 1.3576738624572753,
+  "r1": -0.9998117424236187,
+  "regime": "coherent",
+  "pred": 1.3571428571428572,
+  "gate": "at-edge"
+ },
+ "L_nest_b8_beta0.9_s0": {
+  "kappa": 0.3748651580810547,
+  "r1": 0.03482676564062317,
+  "regime": "mixed",
+  "pred": null,
+  "gate": "sub-edge"
+ },
+ "L_nest_b8_beta0.9_s1": {
+  "kappa": 0.37487852478027345,
+  "r1": 0.021743655479442712,
+  "regime": "mixed",
+  "pred": null,
+  "gate": "sub-edge"
+ }
+}

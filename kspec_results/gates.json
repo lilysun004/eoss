@@ -1,0 +1,122 @@
+[
+ {
+  "cell": "L_b128_beta0.9_s0",
+  "beta": 0.9,
+  "batch": 128,
+  "kappa_raw": 2.1067423095703126,
+  "r1": -0.06741192676432828,
+  "regime": "mixed",
+  "plateau_pred": null,
+  "gate": "sub-edge"
+ },
+ {
+  "cell": "L_b128_beta0.9_s1",
+  "beta": 0.9,
+  "batch": 128,
+  "kappa_raw": 2.162304016113281,
+  "r1": -0.09932556268933114,
+  "regime": "mixed",
+  "plateau_pred": null,
+  "gate": "sub-edge"
+ },
+ {
+  "cell": "L_b2048_beta0.9_s0",
+  "beta": 0.9,
+  "batch": 2048,
+  "kappa_raw": 3.8123148651123047,
+  "r1": -0.999433871436339,
+  "regime": "coherent",
+  "plateau_pred": 3.8,
+  "gate": "at-edge"
+ },
+ {
+  "cell": "L_b2048_beta0.9_s1",
+  "beta": 0.9,
+  "batch": 2048,
+  "kappa_raw": 3.766077941894531,
+  "r1": -0.9984332645863442,
+  "regime": "coherent",
+  "plateau_pred": 3.8,
+  "gate": "at-edge"
+ },
+ {
+  "cell": "L_b32_beta0.9_s0",
+  "beta": 0.9,
+  "batch": 32,
+  "kappa_raw": 0.6195130920410157,
+  "r1": 0.2803242310505787,
+  "regime": "mixed",
+  "plateau_pred": null,
+  "gate": "sub-edge"
+ },
+ {
+  "cell": "L_b32_beta0.9_s1",
+  "beta": 0.9,
+  "batch": 32,
+  "kappa_raw": 0.6250809860229493,
+  "r1": 0.31748810769407326,
+  "regime": "DC",
+  "plateau_pred": 0.19999999999999996,
+  "gate": "sub-edge"
+ },
+ {
+  "cell": "L_b512_beta0.9_s0",
+  "beta": 0.9,
+  "batch": 512,
+  "kappa_raw": 3.6662891845703127,
+  "r1": -0.8915156939250106,
+  "regime": "coherent",
+  "plateau_pred": 3.8,
+  "gate": "at-edge"
+ },
+ {
+  "cell": "L_b512_beta0.9_s1",
+  "beta": 0.9,
+  "batch": 512,
+  "kappa_raw": 3.652816162109375,
+  "r1": -0.8804365220410372,
+  "regime": "coherent",
+  "plateau_pred": 3.8,
+  "gate": "at-edge"
+ },
+ {
+  "cell": "L_b8_beta0.99_s0",
+  "beta": 0.99,
+  "batch": 8,
+  "kappa_raw": 0.033625682067871095,
+  "r1": 0.246355910115009,
+  "regime": "mixed",
+  "plateau_pred": null,
+  "gate": "sub-edge"
+ },
+ {
+  "cell": "L_b8_beta0.99_s1",
+  "beta": 0.99,
+  "batch": 8,
+  "kappa_raw": 0.03350452117919922,
+  "r1": 0.2537013157250891,
+  "regime": "mixed",
+  "plateau_pred": null,
+  "gate": "sub-edge"
+ },
+ {
+  "cell": "L_b8_beta0.9_s0",
+  "beta": 0.9,
+  "batch": 8,
+  "kappa_raw": 0.3426868896484375,
+  "r1": 0.16073196839808226,
+  "regime": "mixed",
+  "plateau_pred": null,
+  "gate": "sub-edge"
+ },
+ {
+  "cell": "L_b8_beta0.9_s1",
+  "beta": 0.9,
+  "batch": 8,
+  "kappa_raw": 0.34442973327636717,
+  "r1": 0.1698696163816712,
+  "regime": "mixed",
+  "plateau_pred": null,
+  "gate": "sub-edge"
+ }
+]

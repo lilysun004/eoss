@@ -141,16 +141,57 @@ def est_iii_fine(tag, c_list=(0.9, 1.0, 1.05, 1.1, 1.2, 1.35), n_rep=16, steps=8
     json.dump(rows, open(os.path.join(MS, f"{tag}_iii_fine{frame_suffix}.json"), "w"), indent=1)
 
 
+def est_iii_control(tag, c_list=(0.85, 1.0, 1.15), n_rep=16, steps=400, burn=60):
+    """Flat-control: replicas initialized ORTHOGONAL to V; their V-readout growth = the
+    bulk->V injection baseline that shifts (iii)'s crossing left. Methods documentation."""
+    net, loss_fn, X, Y, m, ck = _load_net(tag)
+    V = T.tensor(np.load(os.path.join(MS, f"{tag}_framepool.npz"))["V"], dtype=T.float32)
+    beta = m["beta"]; lr = m["lr"]; optn = m["optn"]
+    params = [p for p in net.parameters() if p.requires_grad]
+    d = sum(p.numel() for p in params)
+    for c in c_list:
+        g = T.Generator().manual_seed(7777 + m["seed"])
+        dth = T.randn(d, n_rep, generator=g)
+        dth -= V @ (V.t() @ dth)                         # kill the in-frame component
+        dth /= dth.norm(dim=0, keepdim=True)
+        dv = T.zeros(d, n_rep)
+        logscale = 0.0; series = []
+        for t in range(steps):
+            idx = T.randperm(len(X), generator=g)[:m["batch"]]
+            lo = loss_fn(net(X[idx]).squeeze(-1), Y[idx])
+            grads = T.autograd.grad(lo, params, create_graph=True)
+            from utils.measure import create_hessian_vector_product, flatt
+            hvp = create_hessian_vector_product(lo, net, params=params, grads=grads,
+                                                flat_grads=flatt(grads))
+            try:
+                Hd = T.stack([hvp(dth[:, r], retain_graph_override=True)
+                              for r in range(n_rep)], dim=1)
+            finally:
+                hvp.free_memory()
+            dv = beta * dv + Hd
+            dth = dth - c * lr * ((Hd + beta * dv) if optn == "SGD-Nesterov" else dv)
+            ro2 = float(((V.t() @ dth) ** 2).sum() + ((V.t() @ dv) ** 2).sum())
+            series.append(np.log(max(ro2, 1e-300)) + 2 * logscale)
+            full2 = float((dth ** 2).sum() + (dv ** 2).sum())
+            s_ = np.sqrt(full2 / (2 * n_rep)) + 1e-300
+            dth /= s_; dv /= s_; logscale += np.log(s_)
+        y = np.array(series[burn:])
+        sl = 0.5 * float(np.polyfit(np.arange(len(y)), y, 1)[0])
+        print(f"[iii-ctrl] {tag} c={c}: control V-readout growth={sl:+.4f}", flush=True)
+
+
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage", required=True,
-                    choices=["fine", "frame3", "mpool3", "i3", "ii3", "fine3"])
+                    choices=["fine", "frame3", "mpool3", "i3", "ii3", "fine3", "control"])
     ap.add_argument("--cells", nargs="+", required=True)
     a = ap.parse_args()
     for tag in a.cells:
         if a.stage == "fine":
             est_iii_fine(tag)
+        elif a.stage == "control":
+            est_iii_control(tag)
         elif a.stage == "frame3":
             build_frame_top3(tag)
         elif a.stage == "mpool3":

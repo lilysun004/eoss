@@ -129,14 +129,14 @@ def rho_operator(pool, optn, beta, ceta, iters=60, seed=0):
     Js = T.stack(Js)                                         # [P, 2K, 2K]
     g = T.Generator().manual_seed(seed)
     S = T.randn(2 * K, 2 * K, generator=g); S = S @ S.t(); S /= T.linalg.norm(S)
-    rho = 1.0
+    logs = []
     for it in range(iters):
         S2 = T.einsum("pij,jk,plk->il", Js, S, Js) / P
         r = float(T.linalg.norm(S2))
         S = S2 / r
-        if it >= iters - 10:
-            rho = r if it == iters - 10 else 0.7 * rho + 0.3 * r
-    return rho
+        if it >= iters // 2:
+            logs.append(np.log(max(r, 1e-300)))   # geometric mean over tail: robust to the
+    return float(np.exp(np.mean(logs)))           # norm oscillation of complex dominant pairs
 
 
 def estimator_i(tag):

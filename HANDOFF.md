@@ -21,29 +21,31 @@ Code in `experiments/`, results (gitignored) in `results/`. Run env:
    (τ_rot exponent ≈0); the (β,batch) table shows large-batch κ\* = **2(1+β) exactly**. So
    κ\* = min( 2(1+β) [β-edge, GBS=2, stability, universal], reach(batch) [loss-geometry, non-universal] ).
 
-## THE LIVE THREAD — κ_spec (this is what to work on) → read `KSPEC_DESIGN.md`
-The two momentum plateaus 2(1±β)/η are **one** closed-loop marginality condition λ·|T(ω\*)| = 2 at two
-frequencies of the momentum transfer T(ω) = η/(1−βe^{−iω}): ω\*=π (coherent period-2)→(1+β), ω\*=0
-(DC)→(1−β). So the **universal path-computable scalar (no optimizer math):**
-`κ_spec = λ_B·|T̂(ω*)| = 2 at all batches`, T̂ = measured gradient→step transfer, ω\* = measured mode
-frequency. **R is just the decoherence parameter that selects ω\*** (explains R's half-collapse).
-- **CONFIRMED free:** ω\* migration is real — increment lag-1 autocorr r₁ goes +0.95 (small-batch DC)
-  → −0.99 (b2048 β0.9, period-2); endpoint κ_spec = 1.95 ≈ 2. The mechanism is banked.
-- **PENDING (your job):** does κ_spec = 2 hold *quantitatively* across the interpolation band? Needs a
-  targeted ~15-cell rerun — the old sweep logged UNSIGNED cosines (phase unrecoverable). **The
-  signed-logging patch is DONE and verified (commit 9fd10f8):** `slow_sweep.py` now logs signed
-  in-frame `gu/su/mu` + fixed-frame `gu0/su0`.
-- **Next steps (spec'd in KSPEC_DESIGN.md):** (a) wire a ~12-cell ladder driver (β0.9 b8→b2048 +
-  β0.99 b8) — reuse `experiments/p1_isoR.py`'s pattern AND make a liveness-bisect pre-flight mandatory
-  (high-β/large-batch cells die at canonical lr — this has cost us cells 4×); (b) offline κ_spec
-  analysis (Welch T̂ from signed gu/su, spectral-integral κ_spec, in-frame-vs-fixed-frame check),
-  evaluated against the **pre-registered marginality gate + pass criteria** in KSPEC_DESIGN.md;
-  (c) add a Nesterov optimizer to `utils/optimizer.py`, run the trio (zero-math third-threshold test);
-  (d) wide-grid collapse figure ONLY if the gated ladder passes.
+## THE κ_spec / κ_ms RESULTS (2026-07-12 session — COMPLETE) → read `KSPEC_RESULTS.md`
+The pending κ_spec test RAN and PASSED its committed pre-registration, and the follow-on
+mean-square program resolved the middle band. One-paragraph version:
+**κ_spec = 2 at the coherent edge, formula-free, two optimizers, three thresholds** (SGDM b512/
+b2048: 2.007 ± CV 0.006 with gain = 1/(1+β) to 3 decimals; Nesterov anchor ratio 1.000, gain =
+(1+2β)/(1+β) to 3 decimals, κ_spec = 2.00; sub-edge cells all < 2, two-sided holds). The STRONG
+form (every plateau spectrally marginal) is REFUTED: mixed-ω plateaued cells read 0.33/0.54/1.51
+with gain ≈ 1 (buffer decoheres; measured open-loop R² +1.00 → −43 down the ladder). The
+second-moment program (κ_ms, pre-registered ADDENDA 1–5) found: **no moment order gives a
+universal =2 pin (Reading A dead), but the mean-square WALL is real and measured** — onset
+brackets from bitwise replay checkpoints put every cell 1.15–1.35× below its wall (κ_ms_emp
+1.6–2.0, → 2 exactly at the coherent end), with a noise-growing margin and one clean anomaly
+(b8 β0.9 regulation budget ≈ 1.05, death≈onset). Estimator reconciliation saga + calibration
+status in KSPEC_RESULTS.md / ADDENDA 4–5.
+- **Wide-grid collapse figure is UNLOCKED** (committed gate passed) — not yet run.
+- **Open quantitative target: the margin law** — margin(c*−1) vs curvature-noise CV(h)²
+  (archived r=0.895 law is the candidate), plus recomputing the κ_ms column under one
+  calibrated construction (est-(i) with its measured +0.3 bias band at mixed cells, empirical
+  onsets as ground truth).
 
 ## Doc map
-- **`KSPEC_DESIGN.md`** — the live κ_spec spec: hypothesis, banked result, pre-registered gate + pass
-  criteria, runner-patch spec (done), estimator plan, cells. **Primary working doc.**
+- **`KSPEC_RESULTS.md`** — the 2026-07-12 session's full results (κ_spec PASS, κ_ms walls, margins, budgets). **Read after this file.**
+- **`KSPEC_PREREG_ANNOTATIONS.md`** — all five pre-registration addenda (chain of custody).
+- **`KSPEC_DESIGN.md`** — the original κ_spec spec (now executed): hypothesis, banked result, pre-registered gate + pass
+  criteria, runner-patch spec (done), estimator plan, cells. Historical.
 - **`LESSONS.md`** — methodology / good practices earned the hard way this project. Read before running
   anything; several rules here would have saved weeks.
 - **`SUMMARY.md`** — full detailed historical record (all six parts). ARCHIVE. Parts on the

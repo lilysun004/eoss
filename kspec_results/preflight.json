@@ -1,0 +1,116 @@
+{
+ "b8_beta0.9": {
+  "lr": 0.002,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.002,
+    "verdict": "live",
+    "kappa": 0.3348988952636719,
+    "note": "kappa_late 0.335, sn_slope 0.00000"
+   }
+  ]
+ },
+ "b32_beta0.9": {
+  "lr": 0.005,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.005,
+    "verdict": "live",
+    "kappa": 0.678265266418457,
+    "note": "kappa_late 0.678, sn_slope -0.00028"
+   }
+  ]
+ },
+ "b128_beta0.9": {
+  "lr": 0.006,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.006,
+    "verdict": "live",
+    "kappa": 2.0091610107421873,
+    "note": "kappa_late 2.009, sn_slope -0.00150"
+   }
+  ]
+ },
+ "b512_beta0.9": {
+  "lr": 0.008,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.008,
+    "verdict": "live",
+    "kappa": 3.63454345703125,
+    "note": "kappa_late 3.635, sn_slope -0.00028"
+   }
+  ]
+ },
+ "b2048_beta0.9": {
+  "lr": 0.0065,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.0065,
+    "verdict": "live",
+    "kappa": 3.738178009033203,
+    "note": "kappa_late 3.738, sn_slope -0.00439"
+   }
+  ]
+ },
+ "b8_beta0.99": {
+  "lr": 0.0001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.0002,
+    "verdict": "diverged",
+    "kappa": null,
+    "note": "died at measured step 1556"
+   },
+   {
+    "lr": 0.0001,
+    "verdict": "live",
+    "kappa": 0.02546605911254883,
+    "note": "kappa_late 0.025, sn_slope -0.00001"
+   }
+  ]
+ },
+ "nest_b8_beta0.9": {
+  "lr": 0.002,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.002,
+    "verdict": "live",
+    "kappa": 0.3635133819580078,
+    "note": "kappa_late 0.364, sn_slope -0.00000"
+   }
+  ]
+ },
+ "nest_b128_beta0.9": {
+  "lr": 0.006,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.006,
+    "verdict": "live",
+    "kappa": 1.494247055053711,
+    "note": "kappa_late 1.494, sn_slope -0.00161"
+   }
+  ]
+ },
+ "nest_b2048_beta0.9": {
+  "lr": 0.0065,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.0065,
+    "verdict": "live",
+    "kappa": 1.3777645416259765,
+    "note": "kappa_late 1.378, sn_slope -0.00072"
+   }
+  ]
+ }
+}
