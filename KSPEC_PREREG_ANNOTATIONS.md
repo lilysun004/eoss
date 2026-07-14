@@ -363,3 +363,41 @@ textbook EMA, reported as a finding.)
   (Muon buffer not exposed) -- geometry/frame decisions are explicitly deferred to analysis;
   tonight only logs primitives.
 Standing rules: no SUMMARY/KSPEC_RESULTS writes, no regressions/fits tonight.
+
+---
+
+# ADDENDUM 8 (2026-07-13, registered BEFORE any Tier-2 fit is run): the two-tier north star
+# and the Tier-2 fitting protocol (fit itself deferred to the analysis session)
+
+**Tier 1 (done):** kappa_spec = 2 at the coherent edge, all optimizers, formula-free.
+**Tier 2 (target):** ONE empirical curve Y = f(X) across ALL optimizers for the deviation.
+
+## Y (primary): the GROUND-TRUTH onset margin from brackets, margin := c_onset - 1
+(onset = registered excitation rule, ADDENDUM 5). Companion panel: regulation budget :=
+c_death/c_onset. The deficit 2 - kappa_spec and the estimator margin c*_2 - 1 are consistency
+OVERLAYS, never the fitted Y (immunity to the frame/floor biases cataloged in ADDENDA 4-5).
+
+## X candidates (passive path statistics of the undisturbed plateau, zero hyperparameters):
+r1 (in-frame increment lag-1 autocorr), 1 - |r1|, spectral weight off the pi-peak
+(1 - P_hi where P_hi = PSD fraction at omega > 3pi/4), and pool CV(h)^2 (fixed-u curvature
+noise). The Tier-3 lesson stands: raw landscape noise CANNOT be X (beta-sweep); the
+optimizer's filtering must be in X implicitly via path measurement, never via beta.
+
+## Circularity guard (rule, fixed now): Y and X from DIFFERENT instruments.
+Y is intervention-based and built from LOSS/lr observables only (bracket excitation/death);
+X from passive statistics (may be u_B-derived since Y is not). No shared estimated ingredient
+on both axes (the shared-eigenvector mediation lesson, applied prophylactically).
+
+## Expected structure (from the first overnight): TWO related curves, both anchored at (0,0)
+at the deterministic end -- margin vs X and budget vs X, opposite regimes (coherent: ~0.05
+margin/zero budget; noisy: 0.2-0.3 margin/wide budget). If both collapse on the SAME X, that
+is the R-story's final quantitative form (R was the hyperparameter-flavored proxy for this X).
+
+## Registered fallback + failure criterion:
+- Fallback: a two-variable surface (decoherence x noise amplitude) shared across optimizers
+  still counts as Tier-2 universality.
+- FAILURE criterion: after fitting on measured X's only, an optimizer-identity dummy adds
+  significant explanatory power (residual sorts by optimizer) -> the honest claim shrinks to
+  per-family fits and the residual structure is the next mechanism hunt.
+Deliverable shape: two-panel figure (margin | budget) vs the winning X, all optimizers pooled,
+overlays for the estimator-based Y variants.
