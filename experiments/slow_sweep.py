@@ -94,7 +94,8 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
     T.manual_seed(seed)
     X, Y = L.get_data(); net, loss_fn = L.build()
     params_dict = ({} if optn == "SGD" else
-                   ({"beta1": beta, "beta2": 0.99} if optn == "Adam" else {"beta": beta}))
+                   ({"beta1": beta, "beta2": 0.99} if optn == "Adam" else
+                    ({"momentum": beta} if optn == "Muon" else {"beta": beta})))
     opt = create_optimizer(optn, net, lr, params_dict)
     params = [p for p in net.parameters() if p.requires_grad]
     memory = 1.0 / (1.0 - beta) if beta > 0 else 1.0

@@ -42,6 +42,10 @@ LADDER = [("b8_beta0.9",      "SGD-Momentum",  0.90,    8, 0.0020,  30000,     8
 ADAM   = [("adam_b8",   "Adam", 0.90,    8, 0.0010, 30000, 8000, 3000),
           ("adam_b128", "Adam", 0.90,  128, 0.0010, 20000, 5000, 2000),
           ("adam_b2048","Adam", 0.90, 2048, 0.0010, 16000, 4000, 1500)]
+EXTRA  = [("nest_b256_beta0.9", "SGD-Nesterov", 0.90,  256, 0.0070, 18000, 4500, 1500),
+          ("nest_b512_beta0.9", "SGD-Nesterov", 0.90,  512, 0.0080, 16000, 4000, 1500),
+          ("adam05_b2048",      "Adam",         0.50, 2048, 0.0010, 16000, 4000, 1500),
+          ("b64_beta0.9",       "SGD-Momentum", 0.90,   64, 0.0055, 24000, 6000, 2000)]
 TRIO   = [("nest_b8_beta0.9",   "SGD-Nesterov", 0.90,    8, 0.0020,  30000,    8000,  3000),
           ("nest_b128_beta0.9", "SGD-Nesterov", 0.90,  128, 0.0060,  20000,    5000,  2000),
           ("nest_b2048_beta0.9","SGD-Nesterov", 0.90, 2048, 0.0065,  16000,    4000,  1500)]
@@ -199,10 +203,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--preflight", action="store_true"); ap.add_argument("--run", action="store_true")
     ap.add_argument("--status", action="store_true"); ap.add_argument("--trio", action="store_true")
-    ap.add_argument("--adam", action="store_true"); ap.add_argument("--anchor", action="store_true")
+    ap.add_argument("--adam", action="store_true"); ap.add_argument("--extra", action="store_true")
+    ap.add_argument("--anchor", action="store_true")
     ap.add_argument("--concurrency", type=int, default=3)
     a = ap.parse_args()
-    cells = ADAM if a.adam else (TRIO if a.trio else LADDER)
+    cells = (EXTRA if a.extra else
+             (ADAM if a.adam else (TRIO if a.trio else LADDER)))
     if a.anchor:
         anchor()
     elif a.preflight:

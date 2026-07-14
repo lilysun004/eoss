@@ -33,14 +33,21 @@ def run_bracket(tag, c, steps=3000, div_cap=1e6, lam_every=50):
     X, Y = L.get_data(); net, loss_fn = L.build()
     set_params_inplace(net, ck["theta"])
     lr = c * m["lr"]
-    params_dict = {} if m["optn"] == "SGD" else {"beta": m["beta"]}
+    params_dict = ({} if m["optn"] == "SGD" else
+                   ({"beta1": m["beta"], "beta2": 0.99} if m["optn"] == "Adam"
+                    else {"beta": m["beta"]}))
     opt = create_optimizer(m["optn"], net, lr, params_dict)
     params = [p for p in net.parameters() if p.requires_grad]
-    off = 0
-    for p in params:                                   # restore momentum buffer
-        n = p.numel()
-        opt.inner.state[p] = {"momentum_buffer": ck["buf"][off:off + n].view_as(p).clone()}
-        off += n
+    if "opt_state" in ck:                              # full state restore (any optimizer)
+        opt.inner.load_state_dict(ck["opt_state"])
+        for grp in opt.inner.param_groups:
+            grp["lr"] = lr                             # state dict carries old lr -- override
+    else:
+        off = 0
+        for p in params:                               # legacy ckpt: momentum buffer only
+            n = p.numel()
+            opt.inner.state[p] = {"momentum_buffer": ck["buf"][off:off + n].view_as(p).clone()}
+            off += n
     gen = T.Generator().manual_seed(9000 + m["seed"])
     losses, kappas, u_prev = [], [], None
     died = None

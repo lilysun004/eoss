@@ -327,3 +327,39 @@ Pre-registered predictions:
    bracket adds its point to the margin dataset.
 Preflight: liveness-bisect from lr 0.001 (b8 validated; b128/b2048 start there), precond-kappa
 crawl floor 0.08.
+
+---
+
+# ADDENDUM 7 (2026-07-13, committed BEFORE tonight's cells run): second overnight queue
+
+## Disclosures / resolutions from today's audit round
+- ADDENDUM 6 did NOT declare the Adam frame primary (registration gap, disclosed): uniform
+  rule applies -- in-frame kappa_spec is primary everywhere (Adam b2048: 1.94 primary,
+  1.999 fixed-frame robustness).
+- nest_b128 overshoot: ALL registered estimator variants agree (2.21-2.25, 5 seeds) -> genuine
+  anomaly. Decomposition: measured gain 1.514-1.519 vs pi-formula 1.474 (within 3%); position
+  kappa_raw = 1.46 sits 9% ABOVE the deterministic Nesterov law; bracket wall (1.1, 1.25]
+  confirms the operative wall sits above the deterministic law. Discriminating prediction for
+  tonight's nest_b256/b512 cells: if the overshoot DECAYS toward 2 as coherence purifies
+  (r1 -> -1), it is the mixed-residual/noise-elevated-wall story; if it PERSISTS at fully
+  coherent Nesterov cells, it is Nesterov-specific incompleteness of the single-frequency
+  reduction.
+
+## Fifth-threshold prediction: Adam beta1=0.5, b2048 (adam05_b2048)
+Ideal EMA gain at omega=pi: (1-b1)/(1+b1) = 0.333 (vs 0.0526 at b1=0.9); preconditioned edge
+kappa~* = 2/0.333 = 6. Registered: measured gain ~ 0.33, kappa_spec ~ 2, with NO Adam formula
+in the estimator. Tests that the Adam result tracks beta1 rather than being a b1=0.9
+coincidence. (Also registered: adam_b2048 gain-vs-ideal 0.057 vs 0.0526 -- 3 more seeds decide
+systematic-vs-noise; if systematic, it is a REAL deviation of Adam's effective filter from the
+textbook EMA, reported as a finding.)
+
+## Tonight's other registered additions
+- Adam onset brackets (b2048, b128) via full-state-dict checkpoint restoration (replay now
+  saves opt.inner.state_dict() -- exact Adam v-hat restored, lr overridden after load).
+- Margin-dataset densification: SGDM b64 (new batch, liveness preflight), nest s1 brackets,
+  nest_b256/b512 brackets after their cells.
+- kappa_ms seed padding (est-i/ii under the one construction) at b128 + at-edge cells.
+- Muon b2048 LEFTOVER-COMPUTE ONLY: dense signed logging with RAW-H frame; mu column invalid
+  (Muon buffer not exposed) -- geometry/frame decisions are explicitly deferred to analysis;
+  tonight only logs primitives.
+Standing rules: no SUMMARY/KSPEC_RESULTS writes, no regressions/fits tonight.

@@ -47,7 +47,10 @@ K_RED, POOL_P, N_REP, T_STEPS, BURN = 8, 384, 128, 3000, 300
 # LIVE-phase checkpoint steps (ring-down excluded at b512/b2048: live block = steps 4000-6048)
 CKPT_STEP = {"L_b8_beta0.9": 20000, "L_b32_beta0.9": 20000, "L_b128_beta0.9": 12000,
              "L_b512_beta0.9": 5000, "L_b2048_beta0.9": 5000, "L_b8_beta0.99": 20000,
-             "L_nest_b8_beta0.9": 20000, "L_nest_b128_beta0.9": 12000, "L_nest_b2048_beta0.9": 5000}
+             "L_nest_b8_beta0.9": 20000, "L_nest_b128_beta0.9": 12000, "L_nest_b2048_beta0.9": 5000,
+             "L_adam_b8": 20000, "L_adam_b128": 12000, "L_adam_b2048": 6000,
+             "L_adam05_b2048": 6000, "L_b64_beta0.9": 16000,
+             "L_nest_b256_beta0.9": 6000, "L_nest_b512_beta0.9": 5000}
 
 
 def cellmeta(tag):
@@ -59,7 +62,9 @@ def replay(tag, ck_step):
     m = cellmeta(tag)
     T.manual_seed(m["seed"])
     X, Y = L.get_data(); net, loss_fn = L.build()
-    params_dict = {} if m["optn"] == "SGD" else {"beta": m["beta"]}
+    params_dict = ({} if m["optn"] == "SGD" else
+                   ({"beta1": m["beta"], "beta2": 0.99} if m["optn"] == "Adam"
+                    else {"beta": m["beta"]}))
     opt = create_optimizer(m["optn"], net, m["lr"], params_dict)
     params = [p for p in net.parameters() if p.requires_grad]
     gen = T.Generator().manual_seed(1000 + m["seed"])
@@ -86,6 +91,7 @@ def replay(tag, ck_step):
     rel = max(abs(a - b) / (abs(b) + 1e-12) for a, b in checks.values() if np.isfinite(b))
     ok = rel < 1e-4
     T.save(dict(theta=theta, buf=buf, checks=checks, replay_ok=bool(ok), ck_step=ck_step,
+                opt_state=opt.inner.state_dict(),      # full state: Adam v-hat etc. for brackets
                 meta=m), os.path.join(MS, f"{tag}_ckpt.pt"))
     print(f"[replay] {tag} @ {ck_step}: max rel loss err {rel:.2e} -> {'OK' if ok else 'MISMATCH'}",
           flush=True)
