@@ -23,8 +23,8 @@ import numpy as np
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO)
-OUT = os.path.join(_REPO, "results", "kspec"); MS = os.path.join(OUT, "ms")
-RES = os.path.join(_REPO, "kspec_results")
+OUT = os.path.join(_REPO, "results", os.environ.get("EOSS_KSPEC_OUT", "kspec")); MS = os.path.join(OUT, "ms")
+RES = os.path.join(_REPO, os.environ.get("EOSS_TIER2_RES", "kspec_results"))
 
 
 def plateau_lossmax(tag):
