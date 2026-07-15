@@ -148,5 +148,53 @@
     "note": "kappa_late 32.398, sn_slope 0.00007"
    }
   ]
+ },
+ "nest_b256_beta0.9": {
+  "lr": 0.007,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.007,
+    "verdict": "live",
+    "kappa": 1.4574196853637695,
+    "note": "kappa_late 1.457, sn_slope -0.00118"
+   }
+  ]
+ },
+ "nest_b512_beta0.9": {
+  "lr": 0.008,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.008,
+    "verdict": "live",
+    "kappa": 1.4138295288085938,
+    "note": "kappa_late 1.414, sn_slope -0.00202"
+   }
+  ]
+ },
+ "adam05_b2048": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 5.504618896484375,
+    "note": "kappa_late 5.505, sn_slope 0.00007"
+   }
+  ]
+ },
+ "b64_beta0.9": {
+  "lr": 0.0055,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.0055,
+    "verdict": "live",
+    "kappa": 1.1493452033996583,
+    "note": "kappa_late 1.149, sn_slope -0.00085"
+   }
+  ]
  }
 }

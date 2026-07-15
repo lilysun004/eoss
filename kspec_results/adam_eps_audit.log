@@ -1,0 +1,10 @@
+/Users/xq/Desktop/moonshot/eoss/.claude/worktrees/gbs-search/experiments/adam_eps_audit.py:26: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /Users/runner/work/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:839.)
+  print(f"replayed to 5000, loss={float(lo):.4g}", flush=True)
+replayed to 5000, loss=0.008408
+sqrt(vhat): median=5.686e-04 frac<1e-6=0.000 frac<1e-8=0.000
+  adam_1e-8  kappa~ =   34.993 +/- 0.000
+  rel_0.01   kappa~ =   34.709 +/- 0.000
+  rel_0.1    kappa~ =   32.710 +/- 0.000
+  rel_1.0    kappa~ =   26.943 +/- 0.000
+  rel_10     kappa~ =   19.075 +/- 0.000
