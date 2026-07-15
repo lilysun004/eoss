@@ -79,3 +79,54 @@ measured: **κ_spec = 2 wherever the loop is phase-coherent (universal across op
 formula-free), a mean-square WALL κ_ms → 2 at the coherent end and within 1.2–1.4× everywhere,
 and a noise-scaled safety margin** — position = wall − margin(noise), with the margin law the
 one remaining open quantitative object (deficit-vs-CV(h)² candidate).
+
+---
+
+# UPDATE (2026-07-13/14 sessions): five optimizers, ground-truth walls, and the Tier-2 verdict
+
+## Flagship table, final form (kappa_spec at the coherent edge, FORMULA-FREE)
+| optimizer | cell | n seeds | raw threshold | measured gain (theory) | kappa_spec |
+|---|---|---|---|---|---|
+| SGDM      | b512  | 5 | 3.65-3.67 | 0.549 (1/(1+b)=0.526)* | 1.99-2.02 |
+| SGDM      | b2048 | 5 | 3.77-3.81 | 0.526 (=1/(1+b) exact) | 1.98-2.01 |
+| Nesterov  | b2048 | 5 | 1.357 (=2(1+b)/(1+2b) exact) | 1.474 (=(1+2b)/(1+b) exact) | 2.001-2.003 |
+| Adam b1=.9| b2048 | 5 | kappa~=34 (eps-audit PASS: 7% over 3 decades) | 0.0568-0.0574 (NO formula exists; ideal-EMA 0.0526 is 8% off -- the measured filter is the real one) | 1.94 in-frame / 2.00 fixed-frame |
+(*b512's small gain excess = its mild off-pi spectral weight, consistent.)
+Adam frame-primary registration gap disclosed (ADDENDUM 7); uniform in-frame rule applied.
+
+## Boundary findings (results, not caveats)
+1. **adam05 (b1=0.5) registered-FAIL = the instrument's validity boundary.** kappa_spec read 0.5
+   while the cell is AT its wall by ground truth (plateau itself catapults to loss ~103; kappa~
+   = 5.5 vs ideal edge 6). Domain of the LTI cross-spectral instrument: filter memory >>
+   preconditioner adaptation timescale. b1=0.9 satisfies it; b1=0.5 does not.
+2. **Adam's effective filter deviates from the textbook EMA by +8%, systematically** (gain
+   0.0568-0.0574 across 5 seeds; ideal 0.0526). The loop is marginal against its OWN measured
+   filter -- the reason the formula-free instrument works where formulas would be wrong.
+3. **The nest_b128 overshoot (2.21-2.25, 5 seeds, all estimator variants) is a noise-elevated
+   wall, not an estimator artifact:** raw position sits above the deterministic Nesterov law by
+   an elevation that decays ~13/b (7.7% -> 5.1% -> 2.5% -> 0.0% across b128/256/512/2048) at
+   SATURATED coherence (r1 <= -0.98 from b256 up); measured gain tracks the pi-formula within
+   3% throughout. kappa_spec faithfully reports the elevated operating point.
+
+## Ground-truth wall dataset (onset brackets, 28 rows, 4 optimizers; tier2_dataset.{json,csv})
+Coherent cells (r1 <= -0.9), ALL optimizers: margin 0.025-0.05, budget 1.12-1.19 -- optimizer-
+independent to bracket resolution. Noisy cells: margins 0.10-0.64 growing with noise; b8 beta0.9
+budget 1.03 (razor-thin, the one anomaly); beta0.99 budget >= 1.4. Adam mid-batch cells sit VERY
+deep inside (adam_b128 censored at margin > 1.2). Adam b2048 margin ~0.15 at cv2h=0: the
+preconditioner is an intrinsic noise source invisible to fixed-theta curvature statistics
+(its full-batch plateau weather reaches loss 0.09 vs 3e-7 for SGDM) -- flagged for fit v2.
+
+## Tier-2 verdict (pre-registered protocol, ADDENDUM 8; frozen row table)
+- **Kill-test: PASSED on every fit** (optimizer-identity dummies: best-fit p = 0.72; per-
+  optimizer residuals do not sort). Margins below the wall are OPTIMIZER-INDEPENDENT.
+- **Partial single-X collapse: margin = 0.54 * sqrt(CV(h)^2)** (amplitude scaling), R^2 = 0.59,
+  LOOCV RMSE 0.14, through the origin (coherent-cell margins 0.025 = bracket grid resolution).
+- Largest residual: beta0.99 b8 (2x above the curve) -- a MEMORY direction carried by no
+  registered X; the exploratory tau_su candidate failed (su decorrelates in ~1 step everywhere).
+  Open item, out-of-sample confirmation required for any new X.
+- Contrast pair of scalings: margin-below-stochastic-wall ~ noise AMPLITUDE (sqrt CV^2);
+  position-above-deterministic-law (nest elevation) ~ noise VARIANCE (~1/b).
+- Budget: too quantized to fit (12 deaths); descriptively 1.12-1.19 coherent, 1.03-1.45 noisy.
+**Bottom line: universality of the margin is CONFIRMED in the registered falsification sense
+(nothing sorts by optimizer); its full functional form is only partially captured (amplitude
+law + an open memory residual). That partial outcome is reported as-is.**

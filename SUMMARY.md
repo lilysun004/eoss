@@ -197,3 +197,21 @@ The paper closes on: **one regulated attractor whose position R sets continuousl
 where the stability constraint binds (GBS = 2), regulated below it where the buffer can't couple to the
 unstable direction — with the weather-universality result as the evidence that the physics lives in the
 drift (where the attractor sits), not the noise (which is optimizer-independent).**
+
+---
+
+# PART VII (2026-07-14) — FINAL PICTURE: the two-tier resolution
+**Tier 1 (confirmed, pre-registered, formula-free):** at any phase-coherent edge, the closed
+loop satisfies kappa_spec = lambda_B*|T-hat(omega*)| = 2 -- measured across FIVE thresholds and
+FOUR optimizers (SGDM 3.8, Nesterov 1.357, Adam-precond ~34 with a filter no formula predicts;
+SGD trivially; adam05 marks the LTI instrument boundary), with the optimizer transfer functions
+falling out of measured cross-spectra (grep-certified estimator). No moment order yields a
+universal "=2" at every operating point (Reading A dead, ADDENDA 2-5): plateaus sit INSIDE a
+measurable mean-square wall.
+**Tier 2 (partial, honest):** the wall-margin is optimizer-INDEPENDENT (registered kill-test
+passed, p=0.72) and follows an amplitude law margin ~ 0.5*sqrt(CV(h)^2) (R^2 0.59) with one
+open memory residual (beta0.99) and one flagged instrument gap (Adam's preconditioner as
+intrinsic noise). Position = wall(noise-elevated above the deterministic law, elevation ~1/b)
+minus margin(noise amplitude). R survives as the crude proxy for the decoherence that selects
+omega* and kills first-moment marginality at small batch. Full tables: KSPEC_RESULTS.md,
+kspec_results/; chain of custody: KSPEC_PREREG_ANNOTATIONS.md (8 addenda).
