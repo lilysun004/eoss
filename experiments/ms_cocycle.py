@@ -39,7 +39,7 @@ from utils.measure import flatt
 from utils.curvature_segment import set_params_inplace
 
 T.set_num_threads(int(os.environ.get("EOSS_THREADS", "4")))
-OUT = os.path.join(_REPO, "results", "kspec")
+OUT = os.path.join(_REPO, "results", os.environ.get("EOSS_KSPEC_OUT", "kspec"))
 MS = os.path.join(OUT, "ms"); os.makedirs(MS, exist_ok=True)
 
 C_GRID = np.array([0.5, 0.7, 0.85, 0.95, 1.0, 1.05, 1.15, 1.3, 1.5, 2.0])
@@ -50,7 +50,11 @@ CKPT_STEP = {"L_b8_beta0.9": 20000, "L_b32_beta0.9": 20000, "L_b128_beta0.9": 12
              "L_nest_b8_beta0.9": 20000, "L_nest_b128_beta0.9": 12000, "L_nest_b2048_beta0.9": 5000,
              "L_adam_b8": 20000, "L_adam_b128": 12000, "L_adam_b2048": 6000,
              "L_adam05_b2048": 6000, "L_b64_beta0.9": 16000,
-             "L_nest_b256_beta0.9": 6000, "L_nest_b512_beta0.9": 5000}
+             "L_nest_b256_beta0.9": 6000, "L_nest_b512_beta0.9": 5000,
+             "A_sgd_b2048": 4000, "A_b2048_beta0.9": 4000, "A_nest_b2048_beta0.9": 4000,
+             "A_adam_b2048": 4000, "A_b8_beta0.9": 14000, "A_b32_beta0.9": 14000,
+             "A_adam_b8": 14000, "A_b8_beta0.99": 14000,
+             "A_nest_b128_beta0.9": 9000, "A_nest_b512_beta0.9": 4000}
 
 
 def cellmeta(tag):

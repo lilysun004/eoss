@@ -23,7 +23,7 @@ from utils.measure import create_hessian_vector_product, flatt
 from utils.curvature_segment import set_params_inplace
 
 T.set_num_threads(int(os.environ.get("EOSS_THREADS", "4")))
-OUT = os.path.join(_REPO, "results", "kspec"); MS = os.path.join(OUT, "ms")
+OUT = os.path.join(_REPO, "results", os.environ.get("EOSS_KSPEC_OUT", "kspec")); MS = os.path.join(OUT, "ms")
 
 
 def run_bracket(tag, c, steps=3000, div_cap=1e6, lam_every=50):

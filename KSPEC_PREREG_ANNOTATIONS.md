@@ -401,3 +401,29 @@ is the R-story's final quantitative form (R was the hyperparameter-flavored prox
   per-family fits and the residual structure is the next mechanism hunt.
 Deliverable shape: two-panel figure (margin | budget) vs the winning X, all optimizers pooled,
 overlays for the estimator-based Y variants.
+
+---
+
+# ADDENDUM 9 (2026-07-14, committed BEFORE the architecture battery launches):
+# second-architecture replication battery (mlp_l: 512-wide x 4-layer, 2.37M params = 3x mlp_s,
+# deeper AND wider; same data/loss/harness; EOSS_MODEL env -- zero porting)
+
+CNN excluded on measured COST, not porting: cnn preset exists but fwd+bwd b2048 = 3.5 s on CPU
+(days per at-edge cell). One axis tonight: architecture via mlp_l.
+
+## Battery (~18 cells, A_ prefix, results/kspec_arch/): all lrs re-bisected (windows do NOT
+## transfer -- the twice-fatal failure mode; preflight gates everything)
+- Tier 1: SGD b2048, SGDM b0.9 b2048, Nesterov b2048, Adam b2048 x2 seeds.
+  PREDICTIONS: kappa_spec ~ 2 on all; measured gains ~ 1, 1/(1+b), (1+2b)/(1+b), and Adam's
+  own (near-ideal-EMA, +systematic deviation allowed as on mlp_s).
+- Tier 2: onset brackets on those + sub-edge SGDM b8/b32, Adam b8, SGDM b0.99 b8 x2 seeds.
+  QUESTIONS (branches pre-stated): (a) same FORM margin ~ sqrt(CV(h)^2)? (b) same CONSTANT
+  0.54? same-slope => physical constant; different-slope-same-form => universal law,
+  setup-dependent coefficient -- BOTH reported as measured. (c) coherent band again at
+  margin ~ 0.03 / budget ~ 1.12? (d) beta0.99 memory residual replicates (2x above amplitude
+  law) => the missing memory variable is physics, not an mlp_s quirk.
+- Structure (free): r1 migration up the ladder; nest elevation ~1/b (nest b128/b512 x1 seed);
+  sub-edge kappa_spec < 2.
+Honest branch: if kappa_spec ~ 2 replicates but the margin constant shifts, Tier 1 is
+architecture-independent and Tier 2's coefficient is not -- report both as measured.
+Skip tonight: Muon, CE-loss/dataset axes, any fitting.
