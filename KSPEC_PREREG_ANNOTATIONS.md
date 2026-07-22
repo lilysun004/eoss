@@ -427,3 +427,52 @@ CNN excluded on measured COST, not porting: cnn preset exists but fwd+bwd b2048 
 Honest branch: if kappa_spec ~ 2 replicates but the margin constant shifts, Tier 1 is
 architecture-independent and Tier 2's coefficient is not -- report both as measured.
 Skip tonight: Muon, CE-loss/dataset axes, any fitting.
+
+---
+
+# ADDENDUM 10 (2026-07-21, committed BEFORE any post-battery runs launch):
+# (A) extended-budget completion of the two pre-plateau mlp_l Tier-1 cells;
+# (B) Muon validation program with the deferred frame decision made now.
+
+Context on record from the battery's first pass (data already landed, no new peeking):
+A_b2048_beta0.9 (kspec 1.56/1.70) and A_adam_b2048 (0.29/0.24) read NOT-2, diagnosed
+pre-plateau -- brackets show kappa still climbing toward the wall (SGDM 2.75->3.7 vs
+2(1+b)=3.8) at the 10000-step budget; mlp_l sharpens slower than mlp_s. The blind gate is
+expected to label these cells sub-edge/mixed AS-IS; those first-pass rows stay in the tables.
+
+## (A) A2_ cells: extended budget, NOT hotter lr (registered choice)
+Hotter lr moves the cell to a different wall and breaks comparability with the mlp_s
+counterparts; budget extension tests the same cell later on the same trajectory.
+- A2_b2048_beta0.9 and A2_adam_b2048, seeds 0/1, SAME preflighted lrs (0.0065 / 0.001),
+  max_steps 30000, u0_at 20000 (window length 10000 = first-pass window length).
+- PREDICTIONS: once at-plateau by the blind gate, kappa_spec in [1.8, 2.2]; gain ~ 1/(1+b)
+  for SGDM; Adam near-EMA with the +several-% systematic deviation seen on mlp_s allowed.
+- Brackets after, same grid (1.05, 1.15, 1.3), ckpt at 3x window start rule -> use step 20000.
+- FAILURE branch (pre-stated): still pre-plateau at 30000 (kappa still climbing at window
+  start) -> report "mlp_l sharpening timescale exceeds budget; cell censored". No silent lr
+  change, no third attempt tonight.
+
+## (B) Muon: frame decision registered NOW
+Ground truth is FRAME-FREE: onset brackets (replay + real-optimizer restart) need no
+transfer-function frame. Brackets are therefore the PRIMARY Muon validation; the spectral
+instrument is secondary and gated.
+1. Frame decision: raw parameter frame is the only admissible spectral frame for Muon --
+   orthogonalization is not a diagonal preconditioner and exposes no inv-sqrt; inventing a
+   whitened frame post hoc would be formula-smuggling. Registered expectation: the polar-
+   factor step is state-dependent, so the LTI instrument may fail as it did for adam05
+   (filter-memory vs adaptation-timescale). Pre-stated branches:
+   - gated non-stationary or LTI-invalid -> kappa_spec reading registered INSTRUMENT-INVALID
+     (adam05 class); the bracket carries the at-wall/margin claim alone.
+   - gated stationary + coherent -> kappa_spec interpreted at face value against 2.
+   The existing single cell (L_muon_b2048_s0: kappa_spec 1.33, stationary=false, gain 10.8)
+   is already in the first class pending replication.
+2. Cells (mlp_s): L_muon_b2048_s1, s2 (lr 0.001, momentum 0.95, same protocol as s0) for
+   reproducibility of the reading + stationarity flag; then brackets on s0/s1,
+   cs = (1.05, 1.15, 1.3, 1.5) -- wide grid because no prior wall location exists for Muon.
+   Margin/budget rows enter the Tier-2 dataset as DATA ONLY (no refit tonight).
+3. Cells (mlp_l, if the machine clears the queue): preflight-bisect Muon lr from 0.001
+   (windows do NOT transfer), then A_muon_b2048 s0/s1 + brackets, same rules.
+- PREDICTIONS: Muon plateaus INSIDE a measurable MS wall (onset bracket finite, margin > 0);
+  no prediction on kappa_spec until the stationarity gate speaks. If margin lands on the
+  0.54*sqrt(cv2(h)) curve without optimizer identity, the kill-test result extends to a
+  non-diagonal-geometry optimizer -- reported as measured either way.
