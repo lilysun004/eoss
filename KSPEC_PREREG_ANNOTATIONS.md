@@ -476,3 +476,58 @@ instrument is secondary and gated.
   no prediction on kappa_spec until the stationarity gate speaks. If margin lands on the
   0.54*sqrt(cv2(h)) curve without optimizer identity, the kill-test result extends to a
   non-diagonal-geometry optimizer -- reported as measured either way.
+
+---
+
+# ADDENDUM 10.1 (2026-07-21, committed while phase-2 runs, BEFORE the A2 brackets, hotter
+# brackets, cv2h pools, or any Muon spectral data exist): readout disciplines + classifier
+# amendment + registration corrections.
+
+## (i) A2 crossing-kappa readout (pre-stated before the A2 cells finish)
+The first-pass reading "SGDM b2048 s1 crosses at kappa ~ 4.0 vs 2(1+b) = 3.8" is NOT yet a
+wall-location replication: 4.0 > 3.8 is ABOVE the deterministic edge, the (1.15, 1.3] bin is
+wide (the crossing kappa interpolates inside it), and this cell family is the one flagged
+pre-plateau -- and mlp_s taught us walls sit off the formula in BOTH directions (noise-
+elevated nest, Jensen-elevated SGD). Registered readout for the A2 rerun of exactly this
+cell: report the bracket kappa_trace crossing as an INTERVAL (last kappa before the first
+excitation event, first kappa after) together with the c-bin that produced it; "replicates
+2(1+b)" may only be claimed at the resolution of that interval -- never as a point-match
+within an untested tolerance. If the A2 crossing interval sits wholly above 3.8, that is a
+real small elevation and is reported as one; wholly containing 3.8 -> consistent; the
+first-pass 4.0 carries the pre-plateau + bin-coarseness caveats permanently.
+
+## (ii) First-event-fatal bracket guard (classifier amendment, registered before the
+## 1.6/1.9/2.3 hotter brackets run)
+At hot multipliers a cell may be past DEATH, not just onset, and the onset/death distinction
+blurs when the first excursion is terminal. The margin dataset needs ONSET. Rule: if the
+lowest event c in a cell's bracket set is a death with no non-fatal excitation at or below
+it, the row is logged as "onset <= c, death <= c, unresolved between" -- onset_hi = c and
+c_death = c retained, but margin is CENSORED (NaN, no geometric midpoint) and a machine-
+readable flag `onset_death_unresolved` is set. Applied uniformly on reassembly: any existing
+mlp_s/mlp_l rows this reclassifies are reported as reclassified (column addition + censoring
+rule only; the frozen row-inclusion table is untouched).
+
+## (iii) Muon frame registration -- weakness stated (correction to ADDENDUM 10 B1)
+"Raw frame is the only admissible spectral frame" overclaims. Correct statement: raw frame
+is chosen as PRIMARY because it is the unique hyperparameter-free, state-free option. Muon
+DOES have a natural non-raw geometry -- per-layer spectral, from the orthogonalization's
+structure; a layer-spectral frame instrument is DEFERRED as branch (b), not excluded. A
+kappa_spec failure in the raw frame therefore reads "raw-frame LTI instrument invalid",
+never "no frame could work" -- only one frame was tried. Bracket-primary structure stands.
+
+## (iv) ADDENDUM 9 margin-constant comparison: THREE pre-registered outcomes (wording fixed
+## now, before any mlp_l cv2h number exists)
+(1) same sqrt(cv2(h)) form + same 0.54 constant -> the constant is physical;
+(2) same form + different constant -> the law is universal, the coefficient setup-dependent;
+(3) no sqrt(cv2) form at all on mlp_l -> the amplitude law is mlp_s-specific and Tier-2
+takes real damage. All three reported as measured; (2) is the expected outcome and is fine.
+
+## (v) budget_artifact flag (bookkeeping made machine-readable)
+The pre-plateau first-pass readings (A_b2048_beta0.9_s0/s1, A_adam_b2048_s0/s1) stay in the
+tables but carry a `budget_artifact` column in the tier2 datasets, superseded by the A2
+cells -- prose alone will not protect a future aggregation script.
+
+## Verification order when the chain reports (registered): blind gate -> A2 kappa_spec
+## table -> ADDENDUM 9 constant comparison -> Muon branches. Muon lands in the boundary-
+## findings section next to adam05 regardless of outcome -- its job is mapping the
+## instrument's domain, not padding the optimizer count.

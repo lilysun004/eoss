@@ -26,6 +26,11 @@ sys.path.insert(0, _REPO)
 OUT = os.path.join(_REPO, "results", os.environ.get("EOSS_KSPEC_OUT", "kspec")); MS = os.path.join(OUT, "ms")
 RES = os.path.join(_REPO, os.environ.get("EOSS_TIER2_RES", "kspec_results"))
 
+# ADDENDUM 10.1(v): pre-plateau first-pass readings kept in tables but machine-flagged;
+# superseded by the A2_ extended-budget cells.
+BUDGET_ARTIFACT = {"A_b2048_beta0.9_s0", "A_b2048_beta0.9_s1",
+                   "A_adam_b2048_s0", "A_adam_b2048_s1"}
+
 
 def plateau_lossmax(tag):
     z = np.load(os.path.join(OUT, tag, "dense.npz"))
@@ -72,7 +77,13 @@ def main():
         else:
             onset_hi = min(excited + died)
             onset_lo = max([q for q in quiet if q < onset_hi], default=1.0)
-        onset_mid = float(np.sqrt(onset_lo * onset_hi)) if np.isfinite(onset_hi) else float("nan")
+        # ADDENDUM 10.1(ii): if the lowest event is a death with no non-fatal excitation at
+        # or below it, onset and death are unresolved between onset_lo and that c -- the
+        # midpoint would overstate precision, so margin is censored.
+        onset_death_unresolved = bool(died and np.isfinite(onset_hi) and min(died) == onset_hi
+                                      and not any(e <= onset_hi for e in excited))
+        onset_mid = (float(np.sqrt(onset_lo * onset_hi))
+                     if np.isfinite(onset_hi) and not onset_death_unresolved else float("nan"))
         c_death = min(died) if died else float("nan")
         cmax = max(r["c"] for r in runs)
         kj = os.path.join(MS, f"{tag}_kspec.json")
@@ -91,12 +102,14 @@ def main():
             budget=(c_death / onset_mid) if (died and np.isfinite(onset_mid)) else float("nan"),
             r1=k.get("r1_dxu"), decoh=1 - abs(k["r1_dxu"]) if "r1_dxu" in k else float("nan"),
             offpi=offpi_weight(tag), cv2h=cv2h,
-            kappa_raw=k.get("kappa_raw"), kappa_spec=k.get("kappa_spec"), gain=k.get("gain")))
+            kappa_raw=k.get("kappa_raw"), kappa_spec=k.get("kappa_spec"), gain=k.get("gain"),
+            onset_death_unresolved=onset_death_unresolved,
+            budget_artifact=tag in BUDGET_ARTIFACT))
     os.makedirs(RES, exist_ok=True)
     json.dump(rows, open(os.path.join(RES, "tier2_dataset.json"), "w"), indent=1)
     cols = ["tag", "optn", "batch", "beta", "margin", "budget", "c_onset_lo", "c_onset_hi",
             "c_death", "death_lower_bound", "r1", "decoh", "offpi", "cv2h",
-            "kappa_raw", "kappa_spec", "gain"]
+            "kappa_raw", "kappa_spec", "gain", "onset_death_unresolved", "budget_artifact"]
     with open(os.path.join(RES, "tier2_dataset.csv"), "w") as f:
         f.write(",".join(cols) + "\n")
         for r in rows:
