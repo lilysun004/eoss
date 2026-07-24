@@ -35,6 +35,7 @@ def run_bracket(tag, c, steps=3000, div_cap=1e6, lam_every=50):
     lr = c * m["lr"]
     params_dict = ({} if m["optn"] == "SGD" else
                    ({"beta1": m["beta"], "beta2": 0.99} if m["optn"] == "Adam"
+                    else {"momentum": m["beta"]} if m["optn"] == "Muon"
                     else {"beta": m["beta"]}))
     opt = create_optimizer(m["optn"], net, lr, params_dict)
     params = [p for p in net.parameters() if p.requires_grad]
