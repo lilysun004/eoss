@@ -10,6 +10,19 @@ instrument-development architecture) and `mlp_l` (512×4, 2.37M, the replication
 All estimators formula-free and grep-certified; all predictions registered before data
 (`KSPEC_PREREG_ANNOTATIONS.md`, 10 addenda).
 
+> **⚠️ 2026-08-30 UPDATE — GOLD sweep supersedes the per-cell numbers below.** One run per
+> (optimizer × batch), κ_spec AND GBS from the same run/window, health-masked (float32-death fix):
+> **`GOLD_RESULTS.md`** is now the table of record. Three changes of substance:
+> **(1)** the heavy-ball large-batch "GBS ≠ 2" readings were a numerically-dead-run artifact
+> (`analysis/HB_B2048_GBS_PROBE.md`) — on healthy windows **GBS = 2.00 at the coherent edge for all
+> five optimizers, including Muon** (κ_spec-invalid there), raw thresholds spanning 280×;
+> **(2)** the small-batch ceiling is now explained one level deeper: **κ_B = min(coherent edge,
+> C(B,arch)·(1−β))** — memory enters purely as effective lr; verified out-of-sample by the gold
+> SGDM/SGD/Nesterov columns (`analysis/MEMORY_EDGE_LAW.md`); C(B) ≈ 3.3/6.2/12/21 at b8–b128 (mlp_s)
+> is the remaining unexplained constant; **(3)** the registered one-coordinate collapse test FAILED
+> for every candidate (batch, r₁, u-rotation, cos(s,g); `analysis/collapse_gbs_gold.png`) — there is
+> no single-coordinate universal GBS curve; the min-law above is the standing two-coordinate structure.
+
 ---
 
 ## 1. The headline: what "universal stable quantity or law" survived
@@ -167,7 +180,7 @@ Full list: `SUMMARY.md` Part V + agent-era addenda. One line each:
 
 - **Universal scalar = 2 at every plateau, any moment order** — measured dead (Tier-1 strong form + Reading A).
 - **Reading A (κ_ms = 2 pins every plateau)** — dead; plateaus sit *inside* the wall with noise-dependent margin (Reading B stands).
-- **GBS = 2 as universal** — conditional edge signature only; parks at ~0.3 at small-batch momentum.
+- **GBS = 2 as universal (one-coordinate)** — parks below 2 at small batch for EVERY optimizer incl. SGD-at-low-lr; ceiling explained by the memory-edge min-law (2026-08-30, `analysis/MEMORY_EDGE_LAW.md`); the old "heavy-ball large-batch GBS ≠ 2" readings were float32-dead-run artifacts.
 - **R = memory/τ_rot composite** — free-exponent regression killed it (τ_rot exponent ≈ 0); replaced by min(2(1+β), reach(batch)).
 - **KKT/metastable "force-free phase"** — retracted by the park-vs-attractor test (regulated attractor; `SUMMARY.md` Parts III/IV carry the retraction header).
 - **Fast/noise instruments** (γ-kick, AR-pole, point frozen-cocycle, burstiness, event rate, excursion tails, sharpening-suppression) — all killed; pattern: fast statistics carry noise info, not regime info.
@@ -183,9 +196,9 @@ Full list: `SUMMARY.md` Part V + agent-era addenda. One line each:
 2. **A2 verdict**: name the "plateaued but reads 1.6–1.8" branch; write the crossing intervals per 10.1(i).
 3. **ADDENDUM 9/10.1(iv) constant comparison**: currently undecidable — needs hotter mlp_l brackets or a fluctuation-scaled excitation rule for noisy plateaus.
 4. **Tier-2 refit v2** without the censored anchors (+ candidate new X's: memory residual for β0.99, preconditioner-noise for Adam; out-of-sample only).
-5. **Muon follow-ups**: hotter mlp_s bracket grid (nothing excited at 1.5×); eyeball the mlp_l onset flags; layer-spectral frame = deferred branch (b); the GBS=2.00 observation.
+5. **Muon follow-ups**: hotter mlp_s bracket grid (nothing excited at 1.5×); eyeball the mlp_l onset flags; layer-spectral frame = deferred branch (b); the GBS=2.00 observation (RESOLVED at b2048: real, health-checked, gold row; Muon small-batch ceiling does NOT fit C(B)/(1−0.95) in the raw frame — open with branch (b)).
 6. **κ_ms single-construction recompute** across all cells (est-(i) with its measured +0.3 bias band; empirical onsets as truth) — FINAL TABLE RULE, ADDENDUM 5.
-7. **Wide-grid collapse figure** — unlocked by the gate pass, never rendered.
+7. ~~Wide-grid collapse figure~~ — DONE 2026-08-30 (`analysis/collapse_*_gold.png`): registered criterion failed for every single coordinate; min-law stands.
 8. Escape-rate reconciliation + the unidentified interior regulator (`SUMMARY.md` Part VI).
 
 ---

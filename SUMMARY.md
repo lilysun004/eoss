@@ -33,10 +33,14 @@ lot. The north-star universal scalar (GBS = 2) exists **exactly where the stabil
 ## Part I — The R regime map (the solid backbone)
 
 - **GBS = E_B[sᵀH_Bs / (−gᵀs)] = 2 is an at-the-edge signature**, not an across-optimizer constant.
-  Every cell at its edge reads ~2: SGD at all batch sizes, **and momentum at large batch** (b512/b2048,
-  β ≤ 0.9, all GBS ≈ 2.00 — the alternating-buffer result: at the period-2 edge the buffer sums to
-  g/(1+β) and the (1+β) cancels in the ratio). Small-batch momentum/Adam park **below** the edge
-  (GBS ≈ 0.3, κ ≈ 10–20% of edge).
+  Every cell at its edge reads ~2 — all five optimizers incl. Muon at the coherent edge (GOLD sweep
+  2026-08-30, health-masked; the alternating-buffer result: the buffer sums to g/(1+β) and (1+β)
+  cancels). [2026-08-30 CORRECTION: "SGD at all batch sizes" was budget-limited — SGD at small batch
+  climbs toward 2 and reads 1.85–1.92 at the hottest live lr; and the old heavy-ball large-batch
+  GBS ≠ 2 readings were float32-dead-run artifacts — see `GOLD_RESULTS.md`,
+  `analysis/HB_B2048_GBS_PROBE.md`.] Small-batch momentum/Adam park **below** the edge
+  (GBS ≈ 0.3, κ ≈ 10–20% of edge) — now explained: κ_B = min(coherent edge, C(B,arch)·(1−β)),
+  memory = effective lr only (`analysis/MEMORY_EDGE_LAW.md`).
 - **R is causal and geometry-general.** Fixed-batch β-sweep: τ_rot ≈ const (rotation is a landscape/
   noise property, not β), R varies purely through buffer memory, and edge-reachability collapses
   monotonically. Adam is metastable too (R_precond ≈ 9; parameter-free preconditioned-top-mode

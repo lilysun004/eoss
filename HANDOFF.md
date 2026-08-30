@@ -9,8 +9,10 @@ Code in `experiments/`, results (gitignored) in `results/`. Run env:
 `/Users/xq/Desktop/moonshot/eoss/.venv`.
 
 ## Established results (solid — don't re-derive)
-1. **GBS = 2 is the at-the-edge signature** (GBS = E_B[sᵀH_Bs/(−gᵀs)]): SGD at all batches, momentum
-   at large batch (GBS≈2.00). Small-batch momentum/Adam sit **below** the edge.
+1. **GBS = 2 is the at-the-edge signature** (GBS = E_B[sᵀH_Bs/(−gᵀs)]): all five optimizers at the
+   coherent edge (GOLD sweep 2026-08-30, health-masked — heavy-ball large-batch GBS≠2 readings were
+   float32-dead-run artifacts). Small-batch: EVERY optimizer sits below 2; ceiling law
+   κ_B = min(coherent edge, C(B,arch)·(1−β)) — `GOLD_RESULTS.md`, `analysis/MEMORY_EDGE_LAW.md`.
 2. **"The buffer moves the house, not the weather."** In a paired SGD+SGDM sweep at matched batch,
    *every* fluctuation statistic (catapult clustering, rate, excursion-size distribution) is
    optimizer-independent (set by batch noise); only the **operating-point position** (κ/GBS) tracks

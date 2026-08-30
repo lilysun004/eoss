@@ -69,7 +69,7 @@ def load_cells(json_dirs, run_dirs):
                 continue
             tag = k["cell"]
             dense = None
-            for rd in run_dirs:
+            for rd in run_dirs + [os.path.join(REPO, "results", "kspec_gold")]:
                 p = os.path.join(rd, tag, "dense.npz")
                 if os.path.exists(p):
                     dense = np.load(p); break

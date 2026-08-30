@@ -54,6 +54,13 @@ suspected stride-2 phase-locking of a period-2-alternating GBS (same aliasing fa
 signal); the stride-1 ladder is the clean read, and if stride-1 GBS_med at b2048 still ≠ 2 that
 is itself a finding about GBS phase-sensitivity at coherent cells, to be reported not patched.
 
+> **[ANNOTATION 2026-08-30 — registered caveat resolved, phase-locking explanation WRONG.]** The
+> stride-1 ladder read GBS_med 0.33 at heavy-ball b2048; the cause is neither aliasing nor
+> phase-sensitivity but a numerically dead run (loss ~1e-9 → float32 update < half-ulp from step
+> ~6000; `analysis/HB_B2048_GBS_PROBE.md`). Health-masked, GBS = 2.00 = κ_spec. The old 0.61
+> stride-2 reading was the same death. Secondary test outcome on the GOLD sweep (health-masked,
+> stationary cells): corr 0.91, origin slope 0.87 (`kspec_results/gold/agreement.json`).
+
 ## Interpretation rulings (fixed before data)
 
 1. The gate's "OR independent attractor/at-edge evidence" clause will NOT be invoked; park-test
