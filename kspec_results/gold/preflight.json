@@ -1,0 +1,302 @@
+{
+ "sgd_b2048": {
+  "lr": 0.01,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.01,
+    "verdict": "live",
+    "kappa": 2.1312060546875,
+    "note": "kappa_late 2.131, sn_slope -0.00006"
+   }
+  ]
+ },
+ "sgdm_b2048": {
+  "lr": 0.0065,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.0065,
+    "verdict": "live",
+    "kappa": 3.738178009033203,
+    "note": "kappa_late 3.738, sn_slope -0.00439"
+   }
+  ]
+ },
+ "nest_b2048": {
+  "lr": 0.0065,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.0065,
+    "verdict": "live",
+    "kappa": 1.3777645416259765,
+    "note": "kappa_late 1.378, sn_slope -0.00072"
+   }
+  ]
+ },
+ "adam_b2048": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 32.39801171875,
+    "note": "kappa_late 32.398, sn_slope 0.00007"
+   }
+  ]
+ },
+ "muon_b2048": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 0.37694818115234374,
+    "note": "kappa_late 0.377, sn_slope 0.00001"
+   }
+  ]
+ },
+ "sgd_b512": {
+  "lr": 0.01,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.01,
+    "verdict": "live",
+    "kappa": 2.1703167724609376,
+    "note": "kappa_late 2.170, sn_slope -0.00015"
+   }
+  ]
+ },
+ "sgdm_b512": {
+  "lr": 0.008,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.008,
+    "verdict": "live",
+    "kappa": 3.63454345703125,
+    "note": "kappa_late 3.635, sn_slope -0.00028"
+   }
+  ]
+ },
+ "nest_b512": {
+  "lr": 0.008,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.008,
+    "verdict": "live",
+    "kappa": 1.4138295288085938,
+    "note": "kappa_late 1.414, sn_slope -0.00202"
+   }
+  ]
+ },
+ "adam_b512": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 32.592251953125,
+    "note": "kappa_late 32.592, sn_slope 0.00011"
+   }
+  ]
+ },
+ "muon_b512": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 0.40064656066894533,
+    "note": "kappa_late 0.401, sn_slope 0.00000"
+   }
+  ]
+ },
+ "sgd_b128": {
+  "lr": 0.01,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.01,
+    "verdict": "live",
+    "kappa": 2.2697198486328123,
+    "note": "kappa_late 2.270, sn_slope -0.00031"
+   }
+  ]
+ },
+ "sgdm_b128": {
+  "lr": 0.006,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.006,
+    "verdict": "live",
+    "kappa": 2.0091610107421873,
+    "note": "kappa_late 2.009, sn_slope -0.00150"
+   }
+  ]
+ },
+ "nest_b128": {
+  "lr": 0.006,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.006,
+    "verdict": "live",
+    "kappa": 1.494247055053711,
+    "note": "kappa_late 1.494, sn_slope -0.00161"
+   }
+  ]
+ },
+ "adam_b128": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 18.8576904296875,
+    "note": "kappa_late 18.858, sn_slope 0.00006"
+   }
+  ]
+ },
+ "muon_b128": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 0.39845440673828125,
+    "note": "kappa_late 0.398, sn_slope 0.00000"
+   }
+  ]
+ },
+ "sgd_b32": {
+  "lr": 0.01,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.01,
+    "verdict": "live",
+    "kappa": 2.5762699890136718,
+    "note": "kappa_late 2.576, sn_slope -0.00020"
+   }
+  ]
+ },
+ "sgdm_b32": {
+  "lr": 0.005,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.005,
+    "verdict": "live",
+    "kappa": 0.678265266418457,
+    "note": "kappa_late 0.678, sn_slope -0.00028"
+   }
+  ]
+ },
+ "nest_b32": {
+  "lr": 0.005,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.005,
+    "verdict": "live",
+    "kappa": 0.8862431716918946,
+    "note": "kappa_late 0.886, sn_slope -0.00046"
+   }
+  ]
+ },
+ "adam_b32": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 7.664783203125,
+    "note": "kappa_late 7.665, sn_slope 0.00001"
+   }
+  ]
+ },
+ "muon_b32": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 0.3473824768066406,
+    "note": "kappa_late 0.347, sn_slope 0.00000"
+   }
+  ]
+ },
+ "sgd_b8": {
+  "lr": 0.01,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.01,
+    "verdict": "live",
+    "kappa": 2.0353089141845704,
+    "note": "kappa_late 2.035, sn_slope -0.00000"
+   }
+  ]
+ },
+ "sgdm_b8": {
+  "lr": 0.002,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.002,
+    "verdict": "live",
+    "kappa": 0.3348988952636719,
+    "note": "kappa_late 0.335, sn_slope 0.00000"
+   }
+  ]
+ },
+ "nest_b8": {
+  "lr": 0.002,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.002,
+    "verdict": "live",
+    "kappa": 0.3635133819580078,
+    "note": "kappa_late 0.364, sn_slope -0.00000"
+   }
+  ]
+ },
+ "adam_b8": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 3.8717518310546875,
+    "note": "kappa_late 3.872, sn_slope -0.00005"
+   }
+  ]
+ },
+ "muon_b8": {
+  "lr": 0.001,
+  "clean": true,
+  "history": [
+   {
+    "lr": 0.001,
+    "verdict": "live",
+    "kappa": 0.4775783386230469,
+    "note": "kappa_late 0.478, sn_slope -0.00000"
+   }
+  ]
+ }
+}
