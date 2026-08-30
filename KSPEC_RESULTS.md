@@ -187,3 +187,25 @@ registered alternative if even 5.5 stays quiet.
   (2.0/3.0/4.5) launched to bound the onset.
 - Location in the write-up: boundary findings, next to adam05 -- instrument-domain mapping,
   not a flagship row.
+
+## 5. Hotter-bracket resolution (2026-08-30, cs 3.0/4.0/5.5 b8 family; 2.0/3.0/4.5 Muon)
+**Constant comparison lands on outcome (3) under the registered rule: no sqrt(cv2h) collapse
+on mlp_l.** Resolved rows, ratio margin / sqrt(cv2h): b32 s1 0.09, b32 s0 0.68, adam_b8 s1
+1.17, b8_beta0.9 s0 4.7, b8_beta0.99 s1 4.1 -- no single constant, not monotone in cv2h, and
+same-cell seeds still differ by a censoring class (adam_b8 s0 and b8_beta0.9 s1 quiet through
+5.5 while their twins resolve). Together with the outcome-(1) refutation above: **the mlp_s
+amplitude law margin = 0.54*sqrt(CV(h)^2) does not transfer to mlp_l in constant OR form, as
+measured by the ADDENDUM 5 excitation rule.**
+
+**Instrument caveat, both directions, now demonstrated within one dataset:** the fixed
+3x-plateau-max excitation bar is not fluctuation-calibrated. Quiet-plateau side: the Muon
+"onsets" written into the datasets (A_muon 1.05-1.3, L_muon 1.5-2.0) are RULE ARTIFACTS --
+max_loss grows smoothly ~c^2 (diffusion scaling, e.g. A_muon s0: 2.3e-4 -> 5.9e-3 across
+c=1.05 -> 4.5) over a 3x bar of 2.4e-4, with no excitation event and kappa <= 0.24 throughout;
+treat those margin rows as invalid, Muon onset remains UNRESOLVED at > 4.5 in every real
+sense. Loud-plateau side: b8-family bases 0.45-1.04 set bars of 1.4-3.1, so late onsets are
+partly bar-height; adam_b8 s1 (7.9 vs 3.1) is a genuine excursion, b8_beta0.9 s0 at c=5.5
+(1.42 vs 1.36) is marginal. The registered alternative -- a fluctuation-scaled excitation
+rule -- is now the required instrument before any Tier-2 refit on mlp_l; rerunning it changes
+Y for every noisy cell on BOTH architectures, so the mlp_s fit must be re-derived under the
+same rule (registered protocol, not a patch).
