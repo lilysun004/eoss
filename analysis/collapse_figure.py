@@ -56,7 +56,8 @@ MRK = {"SGD": "o", "SGD-Momentum": "s", "SGD-Nesterov": "^", "Adam": "D", "Muon"
 ORDER = ["SGD", "SGD-Momentum", "SGD-Nesterov", "Adam", "Muon"]
 XS = [("batch", "batch size (log)", True), ("r1", "r$_1$ (increment lag-1 autocorr along top mode)", False),
       ("step_top", "median step-energy fraction on top mode (log)", True),
-      ("u_rot", "1 − median cos(u$_t$, u$_{t+1}$) (log)", True), ("cv_lam", "CV(λ$_B$) over window (log)", True)]
+      ("u_rot", "1 − median cos(u$_t$, u$_{t+1}$) (log)", True), ("cv_lam", "CV(λ$_B$) over window (log)", True),
+      ("sg_mis", "1 − median cos(s, g): step–gradient misalignment (log)", True)]
 
 
 def load_cells(json_dirs, run_dirs):
@@ -77,12 +78,14 @@ def load_cells(json_dirs, run_dirs):
             z = dense
             w = np.isfinite(z["gu0"]) & np.isfinite(z["gu"]) & np.isfinite(z["su"]) & np.isfinite(z["lam_batch"])
             su, sn, lam, cuu = z["su"][w], z["step_norm"][w], z["lam_batch"][w], z["cos_uu"][w]
+            csg = z["cos_sg"][w] if "cos_sg" in z.files else np.full(w.sum(), np.nan)
             rows.append(dict(cell=tag, optn=k["optn"], beta=k["beta"], batch=int(k["batch"]),
                              arch="mlp_l" if tag.startswith("A") else "mlp_s", stationary=bool(k.get("stationary", True)),
                              gbs=float(k["gbs_med"]), kspec=float(k["kappa_spec"]), r1=float(k["r1_dxu"]),
                              step_top=float(np.nanmedian(su**2 / np.maximum(sn**2, 1e-30))),
                              u_rot=float(max(1 - np.nanmedian(np.abs(cuu)), 1e-6)),
-                             cv_lam=float(np.nanstd(lam) / max(np.nanmean(lam), 1e-30))))
+                             cv_lam=float(np.nanstd(lam) / max(np.nanmean(lam), 1e-30)),
+                             sg_mis=float(max(1 - np.nanmedian(csg), 1e-4))))
     return rows
 
 
@@ -124,7 +127,7 @@ def main():
     stats = {}
     for yname in ("gbs", "kspec"):
         y = np.array([r[yname] for r in rows])
-        fig, axes = plt.subplots(1, len(XS), figsize=(4.2 * len(XS), 4.4), constrained_layout=True)
+        fig, axes = plt.subplots(1, len(XS), figsize=(3.9 * len(XS), 4.4), constrained_layout=True)
         for ax, (xk, xl, lg) in zip(axes, XS):
             x = np.array([r[xk] for r in rows])
             ok = np.isfinite(x) & np.isfinite(y) & (x > 0 if lg else True)

@@ -1,0 +1,3 @@
+76 cells
+[assemble] 76 cells -> kspec_results/healthmasked/HEALTHMASKED_pre_gold.md; agreement {"all": {"n": 76, "corr": 0.6819287130523397, "slope": 0.9268910898936923}, "excl_heavyball": {"n": 44, "corr": 0.5261621390838538, "slope": 0.9769980549748754}, "stationary_only": {"n": 63, "corr": 0.5728495734081964, "slope": 0.9027458347223255}}
+[reassemble] done
