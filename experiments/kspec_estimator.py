@@ -59,13 +59,16 @@ def _r1(x):
     return float(np.dot(x[1:], x[:-1]) / d) if d > 0 else float("nan")
 
 
-def analyze_cell(cell_dir, nperseg_cap=2048):
+def analyze_cell(cell_dir, nperseg_cap=2048, end_step=None):
+    """end_step: optional exclusive upper bound on z['step'] for the analysis window (health truncation)."""
     z = np.load(os.path.join(cell_dir, "dense.npz"))
     meta = json.load(open(os.path.join(cell_dir, "meta.json")))
     gu, su, dxu = z["gu"], z["su"], z["dxu"] if "dxu" in z else None
     gu0, su0, lam = z["gu0"], z["su0"], z["lam_batch"]
     # plateau window = fixed-frame live (u0 frozen at plateau start by the runner)
     win = np.isfinite(gu0) & np.isfinite(gu) & np.isfinite(su) & np.isfinite(lam)
+    if end_step is not None:
+        win &= z["step"] < end_step
     if win.sum() < 512:
         return dict(cell=os.path.basename(cell_dir), ok=False, why=f"window too short ({win.sum()})")
     gbs = z["gbs"][win] if "gbs" in z else None
