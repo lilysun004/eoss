@@ -130,3 +130,60 @@ preconditioner is an intrinsic noise source invisible to fixed-theta curvature s
 **Bottom line: universality of the margin is CONFIRMED in the registered falsification sense
 (nothing sorts by optimizer); its full functional form is only partially captured (amplitude
 law + an open memory residual). That partial outcome is reported as-is.**
+
+---
+
+# 2026-08-30 verification pass (registered order: gate -> A2 -> constant comparison -> Muon)
+
+## 1. mlp_l blind gate (assigned once, blind; results/kspec_arch/gates.json)
+At-edge: A_sgd_b2048 s0/s1 (kappa_raw 1.972/1.968 vs pred 2.0) and A2_b2048_beta0.9_s1
+(3.305 vs 3.8, -13%). Everything else sub-edge/mixed, including all four first-pass
+budget_artifact cells and both A2 Adam cells (raw-frame kappa 37 vs the 3.8 raw-frame law --
+the gate is not built for preconditioned frames, same disclosure as on mlp_s).
+
+## 2. A2 verdict (extended budget 30000, same lrs; branch named per open-queue item 2)
+**Branch name: "slow-approach" -- plateaued by drift gate (kappa_drift +0.005) but still
+BELOW the wall; not the mlp_s picture of parking AT the wall, and not pre-plateau either.**
+- A2_b2048_beta0.9: kappa_raw 2.94 (s0) / 3.31 (s1) vs wall 3.8; kappa_spec 1.584/1.758.
+  s1 is gate-pass at -13% raw yet kappa_spec 1.758 narrowly MISSES the [1.8, 2.2] band:
+  reported as a miss. Reading: at 30000 steps mlp_l SGDM has NOT reached its operating
+  point; kappa_spec correctly reports sub-marginal (it tracks kappa_raw/wall: 3.31/3.8 x 2
+  = 1.74 ~ 1.758). The instrument and the gate agree with each other and disagree with the
+  15% gate tolerance -- the tolerance, not the physics, made s1 "at-edge".
+- **Crossing intervals per ADDENDUM 10.1(i)** (bracket kappa_trace, last-quiet -> first-excited):
+  - A2_b2048_beta0.9_s1: quiet at kappa 3.78 (c=1.15), excited entering at 4.28 (c=1.3)
+    -> crossing interval (3.78, 4.28] CONTAINS 3.8 -> consistent with 2(1+beta) at the
+    achieved resolution. The first-pass "4.0 vs 3.8" reading is superseded by this interval.
+  - A2_b2048_beta0.9_s0: quiet THROUGH kappa = 3.80 sustained (c=1.3, 2000 steps, max_loss
+    1.5e-5) -> wall strictly above 3.80; censored, no upper crossing observed.
+  No elevation claim; no point-match claim. Wall location consistent with, and bounded
+  below by, the deterministic 3.8.
+- A2_adam_b2048: **the formula-less fixed-frame threshold at 2 REPLICATES: kappa_spec_fixed
+  = 1.984 / 1.983** (mlp_s: 1.999/1.998). Raw-frame in-frame reading 0.28/0.31 as expected
+  (these cells logged in raw frame; preconditioned dynamics invisible to it). Adam onset
+  bracket censored quiet through 1.3 -- consistent with the mlp_s deep-inside picture.
+
+## 3. ADDENDUM 9 / 10.1(iv) constant comparison -- outcome (1) REFUTED, (2) vs (3) open
+Resolved mlp_l rows: b32 s0 margin 0.323 vs pred 0.255; b32 s1 0.049 vs 0.291 (seeds
+STRADDLE the law); nest_b128 0.025 vs 0.077; nest_b512 0.025 vs 0.032 (coherent band at
+grid floor, as on mlp_s). Censored rows already decisive against SAME-constant: the whole
+b8 family sat quiet at c=2.3 -> margin > 1.3 vs predictions 0.37-0.48 (>2.7x, as a LOWER
+bound). **Same-form-same-0.54 (outcome 1) is refuted on mlp_l.** Distinguishing universal-
+form-different-coefficient (2) from no-sqrt-form (3) needs the resolved onsets -- hotter
+brackets (3.0/4.0/5.5) launched, plus the fluctuation-scaled excitation rule as the
+registered alternative if even 5.5 stays quiet.
+
+## 4. Muon (bracket-primary per ADDENDUM 10/10.1(iii))
+- **Spectral, mlp_s: kappa_spec 1.333/1.350/1.344 (3 seeds) -- tightly reproducible AND
+  stationary=false in all three (kappa_drift -0.46 to -0.48). Registered reading:
+  raw-frame LTI INSTRUMENT-INVALID (adam05 class); the stable 1.34 is a reproducible
+  artifact of a drifting operating point, not a marginality reading.** mlp_l seconds this:
+  kappa_spec 1.88/1.80 at r1 = -1.00, omega* = pi, but nonstationary (drift -0.32/-0.42).
+- Ground truth: everything quiet through c=1.5 on BOTH architectures (max_loss <= 1e-3,
+  kappa 0.2-0.3 mlp_s / 0.05-0.07 mlp_l) -> onset > 1.5, margin > 0.5 censored. kappa_raw
+  0.12 (mlp_s) / 0.03 (mlp_l): in raw lr*lambda units Muon is nowhere near an edge, yet
+  gbs_med = 2.002 -- the batch-sharpness measure IS pinned at 2. The wall, if any, lives in
+  a non-raw geometry (layer-spectral branch (b), still deferred). Hotter brackets
+  (2.0/3.0/4.5) launched to bound the onset.
+- Location in the write-up: boundary findings, next to adam05 -- instrument-domain mapping,
+  not a flagship row.
