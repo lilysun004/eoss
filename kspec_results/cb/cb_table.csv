@@ -1,0 +1,11 @@
+cell,optn,beta,batch,lr,kB_late,kfull,gap,gap_pred,gap_x_mem,mem,drift_late,gbs_med,kappa_spec,r1_dxu,death_step,healthy_frac,stationary,diverged,ok,why
+CB_hb03_b8_s0,,,,,,,,,,,,,,,,,,,False,no run
+CB_hb08_b8_s0,,,,,,,,,,,,,,,,,,,False,no run
+CB_hb095_b8_s0,,,,,,,,,,,,,,,,,,,False,no run
+CB_sgd_b16_s0,,,,,,,,,,,,,,,,,,,False,no run
+CB_hb05_b16_s0,,,,,,,,,,,,,,,,,,,False,no run
+CB_hb09_b16_s0,,,,,,,,,,,,,,,,,,,False,no run
+CB_hb097_b16_s0,,,,,,,,,,,,,,,,,,,False,no run
+CB_nest_b16_s0,,,,,,,,,,,,,,,,,,,False,no run
+CB_muon095_b16_s0,,,,,,,,,,,,,,,,,,,False,no run
+CB_muon09_b16_s0,,,,,,,,,,,,,,,,,,,False,no run

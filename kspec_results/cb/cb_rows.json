@@ -1,0 +1,52 @@
+[
+ {
+  "cell": "CB_hb03_b8_s0",
+  "ok": false,
+  "why": "no run"
+ },
+ {
+  "cell": "CB_hb08_b8_s0",
+  "ok": false,
+  "why": "no run"
+ },
+ {
+  "cell": "CB_hb095_b8_s0",
+  "ok": false,
+  "why": "no run"
+ },
+ {
+  "cell": "CB_sgd_b16_s0",
+  "ok": false,
+  "why": "no run"
+ },
+ {
+  "cell": "CB_hb05_b16_s0",
+  "ok": false,
+  "why": "no run"
+ },
+ {
+  "cell": "CB_hb09_b16_s0",
+  "ok": false,
+  "why": "no run"
+ },
+ {
+  "cell": "CB_hb097_b16_s0",
+  "ok": false,
+  "why": "no run"
+ },
+ {
+  "cell": "CB_nest_b16_s0",
+  "ok": false,
+  "why": "no run"
+ },
+ {
+  "cell": "CB_muon095_b16_s0",
+  "ok": false,
+  "why": "no run"
+ },
+ {
+  "cell": "CB_muon09_b16_s0",
+  "ok": false,
+  "why": "no run"
+ }
+]
