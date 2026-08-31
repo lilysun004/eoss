@@ -48,7 +48,9 @@ def launch(name, optn, beta, batch, lr, max_steps, u0_at):
     return subprocess.Popen(cmd, stdout=lf, stderr=lf)
 
 def run_auto(conc):
-    lrs = KL.preflight(CELLS)  # bisects, resume-safe, writes preflight.json
+    KL.preflight(CELLS)  # bisects, resume-safe, writes preflight.json (returns None)
+    pj = json.load(open(KL.PRE_JSON))
+    lrs = {n: (v.get("lr") if isinstance(v, dict) else v) for n, v in pj.items()}
     todo = [(n, o, b, bb, lrs.get(n), ms, u0) for (n, o, b, bb, _l, ms, u0, _p) in CELLS
             if lrs.get(n) and not is_done(tag_of(n))]
     print(f"[run] {len(todo)} cells (conc {conc})", flush=True)
