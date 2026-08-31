@@ -32,3 +32,14 @@ KILL condition (registered): if the β grid at fixed batch shows the gap NOT ∝
 [0.8, 1.2]) or ≥ 4 of the 8 memory cells fall outside [1.4, 2.6], the gap law is dead and the residual
 b8→b128 trend (2.4 → 1.8) is to be reported as the obstruction. Standing rules: liveness-bisect per
 cell; raw primitives only; no doc edits by the pipeline; censored cells listed.
+
+---
+> **[VERDICT 2026-08-30 22:40, after data — CB_RESULTS.md, commit f4fa3e7.]** Kill condition NOT
+> triggered (3/9 memory cells outside [1.4, 2.6]; threshold was ≥4). Secondary slope test PASSED
+> (heavy-ball gap ∝ (1−β)^0.91, registered [0.8, 1.2]). Per-cell gap×mem: HB 2.07/2.28/2.58 (b8
+> β0.3/0.8/0.95), 1.95/2.55/2.55 (b16 β0.5/0.9/0.97) — **6/6 PASS**; Nesterov 2.76 (marginal fail,
+> +6% over band; 2.55 at b8 — small systematic elevation vs HB); **Muon 0.94/0.64 FAIL**, with
+> κ_B = 0.208 identical at momentum 0.95 and 0.9 → Muon's ceiling is momentum-independent; its
+> effective memory is not 1/(1−mom) (orthogonalization decouples buffer memory from stability).
+> SGD b16 which-edge test: GBS = 2.04 → own edge binds, as registered. Standing law: for the
+> classical momentum family, **κ_B = κ_full + 2(1−β)**; Muon = boundary finding (frame/memory open).

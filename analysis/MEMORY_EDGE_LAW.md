@@ -83,3 +83,17 @@ mlp_l: C(8)≈1.3 (cells nonstationary, drift −0.3…−0.5 — provisional), 
 - Muon: no β; if the law is about path-measured memory, Muon's small-batch κ_B ceiling should match a memory read from its step autocorrelation (test after data).
 
 Companion: `analysis/noise_amplification.{py,json}` (in-frame amplification A, fixed-frame restoring rate c, diffusion exponent α), `analysis/collapse_figure.py`.
+
+---
+## UPDATE 2026-08-30 (evening): C(B) resolved — the noise-gap law, confirmed out-of-sample
+
+C(B) is not a new constant: **C(B) = 2/(1 − λ_full/λ_B)**, i.e. the memory edge is
+**η_eff·(λ_B − λ_full) = 2 ⟺ κ_B = κ_full + 2(1−β)** — memory compounds only the batch-specific
+(noise) excess of the top batch curvature over the persistent full-batch part. This also derives the
+min-structure: λ_full/λ_B → 1 at large batch dissolves the memory edge and hands over to the coherent edge.
+Registered before data (`analysis/CB_LAW_PREREG.md`), confirmed on 10 fresh cells (`CB_RESULTS.md`):
+heavy ball 6/6 in-band across β 0.3–0.97 and b8/b16 (gap×mem 1.95–2.58, predicted gaps hit to 7–29%,
+slope 0.91); Nesterov marginally high (2.55–2.76); **Muon fails (0.94/0.64) with a momentum-independent
+ceiling (κ_B = 0.208 at mom 0.9 AND 0.95)** — its effective memory is not 1/(1−mom); boundary finding.
+Residual structure to own: gap×mem trends up with β (1.95 at β0.5 → 2.55–2.58 at β≥0.9) — a ~30% second-order
+effect, unexplained.

@@ -18,8 +18,9 @@ All estimators formula-free and grep-certified; all predictions registered befor
 > five optimizers, including Muon** (κ_spec-invalid there), raw thresholds spanning 280×;
 > **(2)** the small-batch ceiling is now explained one level deeper: **κ_B = min(coherent edge,
 > C(B,arch)·(1−β))** — memory enters purely as effective lr; verified out-of-sample by the gold
-> SGDM/SGD/Nesterov columns (`analysis/MEMORY_EDGE_LAW.md`); C(B) ≈ 3.3/6.2/12/21 at b8–b128 (mlp_s)
-> is the remaining unexplained constant; **(3)** the registered one-coordinate collapse test FAILED
+> SGDM/SGD/Nesterov columns (`analysis/MEMORY_EDGE_LAW.md`); C(B) resolved same day: **κ_B = κ_full + 2(1−β)** (noise-gap law),
+> registered and confirmed out-of-sample (`analysis/CB_LAW_PREREG.md`, `CB_RESULTS.md`: HB 6/6, slope 0.91;
+> Nesterov +6% marginal; Muon FAILS with a momentum-independent ceiling — boundary finding); **(3)** the registered one-coordinate collapse test FAILED
 > for every candidate (batch, r₁, u-rotation, cos(s,g); `analysis/collapse_gbs_gold.png`) — there is
 > no single-coordinate universal GBS curve; the min-law above is the standing two-coordinate structure.
 
