@@ -55,3 +55,11 @@ gap_w = κ̃_B − κ̃_full at the stationary plateau:**
 - (H2) memory factor = window 1/(1−β₁) = 10 → **gap_w = 0.2 ± 30%**;
 - (H3) neither → Adam joins Muon as a boundary case (β₂ preconditioner memory confound; check `pdrift`).
 Whichever holds must hold at ALL THREE batches to count. No other quantity will be consulted for the verdict.
+
+> **[ADAM VERDICT 2026-08-31 23:05, after data — ADAM_GAP_RESULTS.md.]** Outcome **(H3)**: gap_w =
+> 3.88 / 4.58 / 4.59 at b8/b16/b32 — outside both registered bands (2±30%, 0.2±30%) at every batch
+> (b8 additionally nonstationary, drift +0.18). Structured failure: the whitened gap is
+> **batch-independent (~4.6)**, mirroring Muon's momentum-independent ceiling — Adam has a constant
+> curvature-noise gap in its own frame, but the 2/(1−β₁) calibration does not transfer; β₂
+> preconditioner memory is the registered suspect. Adam joins Muon as an instrument/frame boundary
+> case for the gap law.

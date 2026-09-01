@@ -97,3 +97,9 @@ slope 0.91); Nesterov marginally high (2.55–2.76); **Muon fails (0.94/0.64) wi
 ceiling (κ_B = 0.208 at mom 0.9 AND 0.95)** — its effective memory is not 1/(1−mom); boundary finding.
 Residual structure to own: gap×mem trends up with β (1.95 at β0.5 → 2.55–2.58 at β≥0.9) — a ~30% second-order
 effect, unexplained.
+
+**Adam (2026-08-31, ADAM_GAP_RESULTS.md):** 3-outcome prereg resolved (H3): whitened gap_w = 3.9/4.6/4.6
+at b8/b16/b32 — neither 2 (EMA DC gain) nor 0.2 (window). Batch-INDEPENDENT gap ~4.6 = structured
+boundary case (cf. Muon's momentum-independent ceiling); β₂ preconditioner memory suspected. The gap
+law's domain: classical momentum family (HB exact, Nesterov +6%); adaptive/orthogonalized optimizers
+have their own constant but not the 2-calibration.
