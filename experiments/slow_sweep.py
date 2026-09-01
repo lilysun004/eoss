@@ -104,7 +104,7 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
     d_ref = None; pinv_snaps = []          # Adam: reference d for drift + sparse full snapshots
     cache = EigenvectorCache(1); u_prev = None; u0 = None   # u0 = frozen reference frame
     dense = {k: [] for k in FIELDS}
-    sparse = dict(lf_step=[], lam_full=[], rn_step=[], R_noise=[], tau_noise=[])
+    sparse = dict(lf_step=[], lam_full=[], lam_full_w=[], rn_step=[], R_noise=[], tau_noise=[])
     gen = T.Generator().manual_seed(1000 + seed)
     diverged = False; ncat = 0
 
@@ -122,6 +122,7 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
                        elapsed_s=time.time() - t0), open(meta_path, "w"), indent=1)
 
     step = 0
+    uf_prev = None
     while step < max_steps:
         idx = T.randperm(len(X), generator=gen)[:batch]; Xb, Yb = X[idx], Y[idx]
         pr = net(Xb).squeeze(-1); lo = loss_fn(pr, Yb); lv = lo.item()
@@ -211,6 +212,26 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
                            eigenvector_cache=EigenvectorCache(1), return_eigenvectors=False,
                            use_power_iteration=False))
                 sparse["lf_step"].append(step); sparse["lam_full"].append(lr * lf)
+                # whitened full-subset top eig for Adam (P^-1/2 H_full P^-1/2 via d_pre), warm power iter.
+                if is_adam:
+                    los2 = loss_fn(net(Xs).squeeze(-1), Ys)
+                    gr2 = T.autograd.grad(los2, params, create_graph=True)
+                    hvp_f = create_hessian_vector_product(los2, net, params=params, grads=gr2,
+                                                          flat_grads=flatt(gr2))
+                    try:
+                        uf = uf_prev.clone() if uf_prev is not None else (d_pre * flatt(gr2).detach())
+                        uf = uf / uf.norm()
+                        lfw = float("nan")
+                        for _ in range(10):
+                            Hu = (d_pre * hvp_f(d_pre * uf, retain_graph_override=True)).detach()
+                            lfw = float(T.dot(uf, Hu)); nn_ = Hu.norm()
+                            if nn_ > 0: uf = Hu / nn_
+                        uf_prev = uf.clone()
+                    finally:
+                        hvp_f.free_memory()
+                    sparse["lam_full_w"].append(lr * lfw)
+                else:
+                    sparse["lam_full_w"].append(float("nan"))
             if len(dense["step"]) % rnoise_every == 0:
                 rn, tn = _rnoise(net, loss_fn, X, Y, batch, memory)
                 sparse["rn_step"].append(step); sparse["R_noise"].append(rn); sparse["tau_noise"].append(tn)

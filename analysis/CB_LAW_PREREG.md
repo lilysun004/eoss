@@ -43,3 +43,15 @@ cell; raw primitives only; no doc edits by the pipeline; censored cells listed.
 > effective memory is not 1/(1−mom) (orthogonalization decouples buffer memory from stability).
 > SGD b16 which-edge test: GBS = 2.04 → own edge binds, as registered. Standing law: for the
 > classical momentum family, **κ_B = κ_full + 2(1−β)**; Muon = boundary finding (frame/memory open).
+
+---
+## Adam addendum (registered 2026-08-31, BEFORE the Adam gap runs)
+
+Adam (β₁ 0.9, β₂ 0.99) was excluded above: its `lam_batch` is whitened while `lam_full` was raw — the
+gap was not computable. `slow_sweep` now logs `lam_full_w` (whitened full-subset top eig, warm power
+iter, Adam only). Cells: adam_b8/b16/b32 (mlp_s, lr from preflight, 30k steps). **3-outcome test on
+gap_w = κ̃_B − κ̃_full at the stationary plateau:**
+- (H1) memory factor = DC gain of the gradient EMA = 1 → **gap_w = 2 ± 30%** at every batch (Adam ≡ SGD in the whitened frame);
+- (H2) memory factor = window 1/(1−β₁) = 10 → **gap_w = 0.2 ± 30%**;
+- (H3) neither → Adam joins Muon as a boundary case (β₂ preconditioner memory confound; check `pdrift`).
+Whichever holds must hold at ALL THREE batches to count. No other quantity will be consulted for the verdict.
