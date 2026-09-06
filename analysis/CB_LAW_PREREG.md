@@ -84,3 +84,12 @@ DC drive (G2 seed-inconsistent) — coherent-regime handover.
 | CB2_nest06_b16 | SGD-Nesterov | 0.60 | 16 | prod ∈ [2.0, 3.0] (elevation persists) — prod ∈ [1.5, 2.0) would instead say the Nesterov elevation was a β0.9 artifact; either is informative, outside [1.5, 3.0] is a FAIL |
 | CB2_muon05_b8 | Muon | 0.50 | 8 | ceiling κ_B within ±20% of mom-0.95 b8 value 0.259 (momentum-independence) AND prod < 1 (stays outside the LTI law) |
 KILL: either HB cell outside [1.5, 2.6] → the G2 law does not survive out-of-sample; report and stop.
+
+> **[CB2 VERDICT 2026-09-06 10:55, after data — G2_CONFIRM_RESULTS.md, with the RED_TEAM_AUDIT
+> lr-conditioning qualifier attached.]** No kill: hb085_b8 = 2.19, hb06_b16 = 2.03 (both in [1.5, 2.6];
+> (1−β) scaling now confirmed at 8 β values × 2 batches out-of-sample). nest06_b16 = 1.96 → registered
+> bin [1.5, 2.0): **the Nesterov elevation was a β0.9 artifact** (boundary value, 1.96 vs bin edge 2.0 —
+> noted). muon05_b8: prod 0.19 < 1 ✓ but κ_B = 1.102 ≫ ±20% of 0.259 (λ-normalized ~2.8×) and drift
+> −0.25 (nonstationary) → **momentum-independence of Muon's ceiling NOT supported at mom 0.5**; the
+> 0.9/0.95 agreement was a large-memory coincidence; Muon stays unmodeled. All constants read as
+> hottest-live-lr O(1) values per the audit — the sharp-edge question remains open (bracket test).
