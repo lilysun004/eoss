@@ -103,3 +103,20 @@ at b8/b16/b32 — neither 2 (EMA DC gain) nor 0.2 (window). Batch-INDEPENDENT ga
 boundary case (cf. Muon's momentum-independent ceiling); β₂ preconditioner memory suspected. The gap
 law's domain: classical momentum family (HB exact, Nesterov +6%); adaptive/orthogonalized optimizers
 have their own constant but not the 2-calibration.
+
+---
+## AUDIT CORRECTIONS (2026-09-06, from analysis/RED_TEAM_AUDIT.md — read it before citing this file)
+
+1. **"= 2" is lr-conditioned, not a plateau invariant**: within same-(β,B) families the gap constant rises
+   with lr (b8 β0.6 1.81→2.24; b32 β0.9 1.87→2.56; b128 0.71→1.93). Read every "2" here as "hottest-live-lr
+   ceiling, O(1) constant in [1.8, 2.6] at the bisected lr". The C(128)=21/CV-6% row used non-preregistered
+   stationarity filtering (unfiltered CV 0.36).
+2. **"Formula-free G2" retracted as independent evidence**: for LTI optimizers the measured transfer is the
+   known filter — G2 validates the instrument; the physics content remains gap = 2(1−β).
+3. **RETRACTED: "even SGD fits (1.87 at b8)"** — SGD's gap is 0.23/0.05 at b128/b512; the b8 agreement was
+   coincidence and is not support.
+4. **Open and decisive**: no divergence bracket has ever been run at a small-batch memory cell — "sharp edge
+   vs soft fluctuation balance" is untested. Registered next experiment if pursued: brackets around
+   CB_hb09_b16 (sharp onset ⇒ edge; smooth degradation ⇒ O(1) balance phenomenology).
+5. Adam's 4.6 carries ±15% systematic (lam_full_w under-convergence); GBS = 2 at the coherent edge is largely
+   stationarity bookkeeping; external validity: one data subset, MSE, two MLPs, ~1 seed per cell.
