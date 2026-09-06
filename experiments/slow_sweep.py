@@ -87,6 +87,7 @@ def _rnoise(net, loss_fn, X, Y, batch, memory, n_noise=5):
 
 def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=40000,
              warmup=6000, stride=1, seed=0, lam_full_every=100, rnoise_every=400,
+             batch2=None, switch_at=None, kick_from=None, kick_every=600, kick_amps=(2., 8., 32., 128.),
              flush_every=2000, div_cap=1e6, n_power=6, u0_at=0):
     t0 = time.time()
     cell = os.path.join(out_dir, tag); os.makedirs(cell, exist_ok=True)
@@ -104,7 +105,7 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
     d_ref = None; pinv_snaps = []          # Adam: reference d for drift + sparse full snapshots
     cache = EigenvectorCache(1); u_prev = None; u0 = None   # u0 = frozen reference frame
     dense = {k: [] for k in FIELDS}
-    sparse = dict(lf_step=[], lam_full=[], lam_full_w=[], rn_step=[], R_noise=[], tau_noise=[])
+    sparse = dict(lf_step=[], lam_full=[], lam_full_w=[], rn_step=[], R_noise=[], tau_noise=[], kick_step=[], kick_amp=[])
     gen = T.Generator().manual_seed(1000 + seed)
     diverged = False; ncat = 0
 
@@ -123,7 +124,26 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
 
     step = 0
     uf_prev = None
+    _kick_A0 = None; _kick_i = 0
     while step < max_steps:
+        if switch_at is not None and step == switch_at and batch2:
+            batch = batch2
+            print(f"[switch] step {step}: batch -> {batch}", flush=True)
+        if (kick_from is not None and step >= kick_from and (step - kick_from) % kick_every == 0
+                and u_prev is not None):
+            if _kick_A0 is None:
+                dxa = np.abs(np.asarray(dense["dxu"], dtype=float))
+                dxa = dxa[np.isfinite(dxa)]
+                _kick_A0 = float(np.median(dxa[-4000:])) if len(dxa) > 100 else None
+            if _kick_A0:
+                amp = kick_amps[_kick_i % len(kick_amps)] * _kick_A0 * (1 if (_kick_i // len(kick_amps)) % 2 == 0 else -1)
+                _kick_i += 1
+                with T.no_grad():
+                    off = 0
+                    for pp in params:
+                        n_ = pp.numel(); pp.add_(amp * u_prev[off:off+n_].view_as(pp)); off += n_
+                sparse["kick_step"].append(step); sparse["kick_amp"].append(amp)
+                print(f"[kick] step {step} amp {amp:.3e}", flush=True)
         idx = T.randperm(len(X), generator=gen)[:batch]; Xb, Yb = X[idx], Y[idx]
         pr = net(Xb).squeeze(-1); lo = loss_fn(pr, Yb); lv = lo.item()
         if not np.isfinite(lv) or lv > div_cap:
@@ -268,7 +288,10 @@ if __name__ == "__main__":
     ap.add_argument("--catapult_target", type=int, default=25); ap.add_argument("--max_steps", type=int, default=40000)
     ap.add_argument("--warmup", type=int, default=6000); ap.add_argument("--stride", type=int, default=1)
     ap.add_argument("--u0_at", type=int, default=0)
+    ap.add_argument("--batch2", type=int, default=None); ap.add_argument("--switch_at", type=int, default=None)
+    ap.add_argument("--kick_from", type=int, default=None); ap.add_argument("--kick_every", type=int, default=600)
     a = ap.parse_args()
     run_cell(a.tag, a.optn, a.beta, a.batch, a.lr, a.out_dir, a.catapult_target, a.max_steps,
-             a.warmup, a.stride, a.seed, u0_at=a.u0_at)
+             a.warmup, a.stride, a.seed, u0_at=a.u0_at,
+             batch2=a.batch2, switch_at=a.switch_at, kick_from=a.kick_from, kick_every=a.kick_every)
     print(f"[slow_sweep] {a.tag} done")
