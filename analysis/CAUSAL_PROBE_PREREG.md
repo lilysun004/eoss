@@ -40,3 +40,34 @@ Standing rules apply (raw primitives, health mask, censored-not-dropped, no doc 
 data-only assembly). lr/batch combos: post-swap combos reuse gold-validated (optimizer, batch, lr) where
 they exist; sgdm b2048@0.002 and swaps flagged as unvalidated-but-conservative. Analysis windows and
 thresholds above are FROZEN; no other statistic will be consulted for the P1/P2/P3 verdicts.
+
+---
+> **[VERDICT 2026-09-06 14:00, after data — CAUSAL_PROBE_RESULTS.md, results/kspec_causal/.]**
+>
+> **P1 (noise ablation):** kill NOT triggered overall, with one registered exception. Scoring note,
+> on the record: P1a as written compared post-swap λ to pre-swap λ_B — a frame error (λ_B changes
+> identity at the swap); both readings reported. Frame-consistent (vs pre-swap λ_full): SGD +34%,
+> SGDM +38% by +6k (rising; SLOWER than the registered ≥30%@2k — strict P1a FAIL on rate, direction
+> confirmed), Adam +2225% in the whitened frame (violent resume). **Muon: flat/−18% → NOT
+> noise-maintained** (registered kill clause applies to Muon alone).
+> **P2 (attractor prediction):** Adam landed at ratio **0.93**, Muon **1.05** of the pre-registered
+> de-novo targets (band ±25%) — both PASS, stationary. SGDM took the registered violent branch:
+> catapult divergence 16 steps post-swap (loss 6.6e-8 → 8.7e4) — the plateau is NOT globally
+> attracting for heavy ball from ~11× above.
+> **P3 (kick train):** registered branch "mixed/other" — reality exceeded both hypotheses for the
+> SGD family: 32×A0 kick KILLED SGD (step 13203), 128×A0 killed SGDM (13835) and Nesterov (13814);
+> 2–8×A0 kicks relaxed with λ_B within ±3.5%. **Adam and Muon survived all 20 kicks each incl.
+> 5×128×A0** (λ̃ change ≤ +17% / ≤ ±3%).
+>
+> **Mechanism answer ("why is the small-batch point stable"):**
+> - **SGD family (LTI):** a noise-maintained marginal state with a FINITE BASIN — weak local
+>   restoring, sharpening resumes when noise is removed, and a hard instability cliff a few
+>   fluctuation-widths along the top mode (sharp-edge picture wins over soft balance for this family;
+>   resolves the audit's open question #3 in favor of "edge" — at the basin boundary, not in the
+>   local λ response).
+> - **Adam:** noise-maintained AND globally robust — the preconditioner absorbs 128× kicks and a 7×
+>   curvature drop, relaxing to the numerically pre-registered endpoint (0.93). Constant-gap plateau
+>   location + soft response everywhere probed.
+> - **Muon:** NOT noise-maintained, yet strongly attracting (predicted from above, 1.05) and inert to
+>   kicks — its plateau is enforced by the update normalization itself, outside the curvature-noise
+>   mechanism entirely.

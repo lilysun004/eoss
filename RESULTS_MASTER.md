@@ -23,6 +23,13 @@ All estimators formula-free and grep-certified; all predictions registered befor
 > Nesterov +6% marginal; Muon FAILS with a momentum-independent ceiling — boundary finding); **(3)** the registered one-coordinate collapse test FAILED
 > for every candidate (batch, r₁, u-rotation, cos(s,g); `analysis/collapse_gbs_gold.png`) — there is
 > no single-coordinate universal GBS curve; the min-law above is the standing two-coordinate structure.
+> **(4, 2026-09-06)** Causal probes (`CAUSAL_PROBE_RESULTS.md`, prereg + verdict in
+> `analysis/CAUSAL_PROBE_PREREG.md`): the small-batch plateau is a noise-maintained marginal state with a
+> FINITE BASIN for the LTI family (kicks of 32–128× the per-step motion are fatal; sharpening resumes when
+> noise is removed) — the sharp-edge reading wins there; Adam is noise-maintained but globally robust
+> (swap-down landed at 0.93 of the pre-registered endpoint); Muon is NOT noise-maintained (kick-inert,
+> normalization-enforced attractor, endpoint 1.05 of prediction). Red-team audit + corrections:
+> `analysis/RED_TEAM_AUDIT.md` (gap constant is lr-conditioned O(1); G2 'formula-free' framing retracted).
 
 ---
 
