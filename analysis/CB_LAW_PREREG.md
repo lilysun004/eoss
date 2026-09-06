@@ -63,3 +63,24 @@ Whichever holds must hold at ALL THREE batches to count. No other quantity will 
 > curvature-noise gap in its own frame, but the 2/(1−β₁) calibration does not transfer; β₂
 > preconditioner memory is the registered suspect. Adam joins Muon as an instrument/frame boundary
 > case for the gap law.
+
+---
+## G2 addendum: the FORMULA-FREE gap law (registered 2026-09-06, BEFORE the CB2 runs)
+
+Exploratory result (all stationary ceiling cells on disk): replacing 1/(1−β) with the path-MEASURED
+low-frequency gain G2 = |T̂(ω→0)|/η (Welch gu0→su0, fixed frame; protocol FROZEN: nperseg =
+min(2048, 2^floor(log2(n/6))), skip bin 0, average lowest max(3, K/64) bins PSD-weighted) gives
+**(λ_B − λ_full)·η·G2 = 2** for the LTI family in the DC-dominated domain (b ≤ 32): SGD 1.88,
+HB 13 cells 1.63–2.44 (median 2.2, incl. mlp_l 1.89/1.93), Nesterov 2.52–2.76 (elevation +15–25%).
+G2 validates against 1/(1−β) (9.4–9.5 at β0.9; 1.00 SGD). Non-LTI: Adam prod 3.3–3.6 (measured
+whitened DC gain 0.8), Muon 0.3–0.6 with band-SENSITIVE G2 (not LTI). Domain limit: b ≥ 64 has no
+DC drive (G2 seed-inconsistent) — coherent-regime handover.
+
+**CB2 confirmation cells + registered predictions (prod = (κ_B − κ_full)·G2, same frozen protocol):**
+| cell | optn | β/mom | b | prediction |
+|---|---|---|---|---|
+| CB2_hb085_b8 | SGD-Momentum | 0.85 | 8 | prod ∈ [1.5, 2.6] |
+| CB2_hb06_b16 | SGD-Momentum | 0.60 | 16 | prod ∈ [1.5, 2.6] |
+| CB2_nest06_b16 | SGD-Nesterov | 0.60 | 16 | prod ∈ [2.0, 3.0] (elevation persists) — prod ∈ [1.5, 2.0) would instead say the Nesterov elevation was a β0.9 artifact; either is informative, outside [1.5, 3.0] is a FAIL |
+| CB2_muon05_b8 | Muon | 0.50 | 8 | ceiling κ_B within ±20% of mom-0.95 b8 value 0.259 (momentum-independence) AND prod < 1 (stays outside the LTI law) |
+KILL: either HB cell outside [1.5, 2.6] → the G2 law does not survive out-of-sample; report and stop.
