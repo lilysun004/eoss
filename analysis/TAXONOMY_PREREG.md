@@ -41,3 +41,29 @@ structurally predictive.
 consistent with the state-function reading — its de-novo b2048 set point (λ = 123) sits BELOW its b8
 plateau (259); the swap-up run relaxed to 106 = 0.86 of that target. Post-hoc reinterpretation, recorded
 here; treated as registered only for future cells (TX_rms_swap_b8 above).
+
+---
+> **[VERDICT 2026-09-07 00:30, after data — TAXONOMY_RESULTS.md, results/kspec_tax/.]** 9 of 10
+> registered prediction groups hit on two never-run optimizers; 1 rule falsified.
+>
+> **DHB (dampened heavy ball):** gap = **2.13 / 2.06** at b8/b16 (predicted 2.0 ± 0.6; window-rule rival
+> 0.2 missed by 10×) — **K1 avoided, the DC-gain law survives its fourth strictly-LTI optimizer under its
+> most dangerous prediction**. Coherent edge: κ_raw 37.93 vs predicted 38 (0.2%!), GBS 1.97 — both PASS.
+> Swap-up +28% → noise-maintained PASS. **Kick train: SURVIVED all 20 incl. 128×A0 → R4 "LTI ⇒ cliff"
+> FALSIFIED (K3 partially triggered)**: the cliff does not follow the LTI/adaptive split; confound on
+> record — A0-tier kicks are not calibrated across optimizers (DHB's dampened steps make 128×A0 a much
+> smaller absolute/σ_x displacement than SGD's 32×A0); the basin dimension needs kick/σ_x units before
+> any absolute claim.
+> **RMSProp:** whitened gap **2.25 / 1.82** at b8/b16 → registered outcome **"~2": Adam's uncalibrated
+> 4.6 is the gradient EMA's doing; the preconditioner is exonerated** (RMSProp shares β₂ = 0.99).
+> Qualifier: both cells nonstationary (drift +0.21/+0.17 — sharpening slower than the 30k budget); GBS
+> at b8 = 1.94 (SGD-like, unlike Adam's 0.4), consistent. b2048 GBS 1.905 PASS; kicks survived (R4
+> adaptive PASS); swap-up +139% noise-maintained PASS; **state-function endpoint: landed at ratio 1.01
+> of its own de-novo b2048 plateau** — the third pre-registered endpoint hit (0.93, 1.05, 1.01).
+>
+> **Standing causal story after this test:** plateau = min over feedback channels of that channel's
+> marginality point. Channel calibration confirmed structurally: gap = 2/G_DC for any optimizer whose
+> step passes the current gradient through (SGD, DHB, RMSProp → 2; HB/Nesterov → 2(1−β); measured at
+> 8+ β values); the coherent edge is universal (7 optimizers at GBS ≈ 2); plateau locations are
+> noise-indexed set points predictable before running (3/3 endpoints). Open: Adam's EMA×frame constant
+> (4.6), Muon's normalization channel, basin calibration, external validity, lr-conditioning (audit).

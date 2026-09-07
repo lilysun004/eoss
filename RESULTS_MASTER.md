@@ -30,6 +30,12 @@ All estimators formula-free and grep-certified; all predictions registered befor
 > (swap-down landed at 0.93 of the pre-registered endpoint); Muon is NOT noise-maintained (kick-inert,
 > normalization-enforced attractor, endpoint 1.05 of prediction). Red-team audit + corrections:
 > `analysis/RED_TEAM_AUDIT.md` (gap constant is lr-conditioned O(1); G2 'formula-free' framing retracted).
+> **(5, 2026-09-07)** Blind taxonomy test on two never-run optimizers (`TAXONOMY_RESULTS.md`,
+> `analysis/TAXONOMY_PREREG.md`): 9/10 registered prediction groups hit — dampened HB confirms the gap
+> law's memory coordinate is the DC gain (gap 2.13/2.06 vs rival 0.2; coherent edge 37.93 vs predicted 38);
+> RMSProp attributes Adam's 4.6 to the gradient EMA (preconditioner exonerated, nonstationarity qualifier);
+> third pre-registered set-point endpoint hit (ratio 1.01). FALSIFIED: "LTI ⇒ kick cliff" — basin structure
+> does not follow the LTI/adaptive split (needs σ_x-calibrated kicks).
 
 ---
 
