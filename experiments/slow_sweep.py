@@ -59,6 +59,20 @@ def _adam_m_flat(opt, params):
     return T.cat(pieces).detach()
 
 
+def _rms_pinv(opt):
+    """RMSProp P^-1/2, same 0.1*median-floor convention as _adam_pinv."""
+    try:
+        pieces = []
+        for p in opt.inner.param_groups[0]["params"]:
+            st = opt.inner.state.get(p)
+            if not st or "square_avg" not in st: return None
+            pieces.append(st["square_avg"].flatten())
+        sqv = T.cat(pieces).detach().clamp_min(0).sqrt()
+        return (1.0 / (sqv + 0.1 * float(sqv.median())).sqrt()).detach()
+    except Exception:
+        return None
+
+
 def _adam_pinv(opt):
     """Robust P^-1/2 (adjudicator protocol): d = 1/sqrt(sqrt(vhat) + 0.1*median(sqrt(vhat))).
     Ones before state init (step 0)."""
@@ -96,12 +110,13 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
     X, Y = L.get_data(); net, loss_fn = L.build()
     params_dict = ({} if optn == "SGD" else
                    ({"beta1": beta, "beta2": 0.99} if optn == "Adam" else
-                    ({"momentum": beta} if optn == "Muon" else {"beta": beta})))
+                    ({"beta2": 0.99} if optn == "RMSProp" else
+                     ({"momentum": beta} if optn == "Muon" else {"beta": beta}))))
     opt = create_optimizer(optn, net, lr, params_dict)
     params = [p for p in net.parameters() if p.requires_grad]
     memory = 1.0 / (1.0 - beta) if beta > 0 else 1.0
-    is_adam = (optn == "Adam")
-    is_mom = beta > 0 and not is_adam
+    is_adam = optn in ("Adam", "RMSProp")   # semantics: preconditioned/whitened path
+    is_mom = beta > 0 and not is_adam and optn != "RMSProp"
     d_ref = None; pinv_snaps = []          # Adam: reference d for drift + sparse full snapshots
     cache = EigenvectorCache(1); u_prev = None; u0 = None   # u0 = frozen reference frame
     dense = {k: [] for k in FIELDS}
@@ -153,9 +168,9 @@ def run_cell(tag, optn, beta, batch, lr, out_dir, catapult_target=25, max_steps=
         s = opt.compute_step_direction(g, params).detach()
         measure = (step % stride == 0)
         if measure:
-            m = (_adam_m_flat(opt, params) if is_adam else
+            m = ((_adam_m_flat(opt, params) if optn == "Adam" else gd) if is_adam else
                  (M.buffer_flat(opt, params) if is_mom else gd))
-            d_pre = _adam_pinv(opt) if is_adam else None
+            d_pre = (_adam_pinv(opt) if optn == "Adam" else _rms_pinv(opt)) if is_adam else None
             if is_adam and d_pre is None:
                 d_pre = T.ones_like(gd)
             # ONE HVP graph for everything: Hs (GBS/a_t) + warm power iteration for (lam_max, u_B).

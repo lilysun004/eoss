@@ -385,12 +385,37 @@ class RMSPropOptimizer(OptimizerWrapper):
         return torch.cat(pieces).detach()
 
 
+
+class SGDMomentumDampedOptimizer(OptimizerWrapper):
+    name = "SGD-Momentum-Damped"
+
+    def __init__(self, net, lr, beta=0.9):
+        self.beta = beta
+        inner = T.optim.SGD(net.parameters(), lr=lr, momentum=beta, dampening=beta)
+        super().__init__(inner)
+
+    def compute_step_direction(self, grads_flat, params):
+        lr = self.param_groups[0]['lr']; beta = self.beta
+        offset = 0; pieces = []
+        for p in params:
+            length = p.numel()
+            g_p = grads_flat[offset:offset + length].view(p.shape)
+            state = self.inner.state.get(p)
+            if state and 'momentum_buffer' in state and state['momentum_buffer'] is not None:
+                v_new = beta * state['momentum_buffer'] + (1 - beta) * g_p
+            else:
+                v_new = (1 - beta) * g_p
+            pieces.append((-lr * v_new).view(-1)); offset += length
+        return torch.cat(pieces).detach()
+
+
 _REGISTRY = {
     'SGD': SGDOptimizer,
     'SGD-Momentum': SGDMomentumOptimizer,
     'SGD-Nesterov': SGDNesterovOptimizer,
     'Adam': AdamOptimizer,
     'RMSProp': RMSPropOptimizer,
+    'SGD-Momentum-Damped': SGDMomentumDampedOptimizer,
     'Muon': MuonOptimizer,
 }
 
